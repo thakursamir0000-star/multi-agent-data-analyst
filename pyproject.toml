@@ -1,0 +1,10 @@
+[project]
+name = "multi-agent-data-analyst"
+version = "0.1.0"
+description = "Autonomous multi-agent data analyst powered by LangGraph, Groq, and Streamlit"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-v --tb=short"
