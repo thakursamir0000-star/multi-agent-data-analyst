@@ -1,5 +1,7 @@
 # 🤖 Multi-Agent Data Analyst
 
+**🔗 Live App:** [multi-agent-data-analyst.streamlit.app](https://multi-agent-data-analyst-gmj6wumftzhvad3tbyyvp9.streamlit.app/)
+
 An autonomous, multi-agent data analysis system powered by **LangGraph**, **Groq**, and **Streamlit**. Upload any CSV/Excel dataset, ask questions in plain English, and watch specialized AI agents plan, code, analyze, and verify insights — all with full observability.
 
 ---
