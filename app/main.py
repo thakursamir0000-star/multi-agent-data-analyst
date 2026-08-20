@@ -410,6 +410,17 @@ def _resume_with_human_input(answer: str) -> None:
 def main():
     """Main Streamlit application."""
 
+    # Check API key is configured
+    api_key = get_env("GROQ_API_KEY")
+    if not api_key:
+        st.error(
+            "**GROQ_API_KEY is not configured.**\n\n"
+            "Go to your Streamlit Cloud app → Settings → Secrets and add:\n"
+            "```toml\nGROQ_API_KEY = \"gsk_your_key_here\"\n"
+            "GROQ_MODEL = \"openai/gpt-oss-120b\"\n```"
+        )
+        return
+
     # Header
     st.markdown('<p class="main-header">🤖 Multi-Agent Data Analyst</p>', unsafe_allow_html=True)
     st.markdown(
