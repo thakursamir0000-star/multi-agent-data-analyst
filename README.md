@@ -1,6 +1,6 @@
 # 🤖 Multi-Agent Data Analyst
 
-**🔗 Live App:** [multi-agent-data-analyst.streamlit.app](https://multi-agent-data-analyst-gmj6wumftzhvad3tbyyvp9.streamlit.app/)
+**🔗 Live App:** [multi-agent-data-analyst.streamlit.app](https://multi-agent-data-analyst-qyzldehynt3vfjoyjumvev.streamlit.app/)
 
 An autonomous, multi-agent data analysis system powered by **LangGraph**, **Groq**, and **Streamlit**. Upload any CSV/Excel dataset, ask questions in plain English, and watch specialized AI agents plan, code, analyze, and verify insights — all with full observability.
 
@@ -202,7 +202,7 @@ python -m pytest tests/test_graph.py -v      # Integration tests
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
 | `GROQ_API_KEY` | (required) | Your Groq API key |
-| `GROQ_MODEL` | `llama-3.3-70b-versatile` | Groq model to use |
+| `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model to use |
 | `MAX_RETRIES` | `2` | Max Critic → Coder retries |
 | `SANDBOX_TIMEOUT_SECONDS` | `30` | Code execution timeout |
 | `MAX_UPLOAD_MB` | `50` | Maximum file upload size |
