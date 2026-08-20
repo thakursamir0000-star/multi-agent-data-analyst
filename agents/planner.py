@@ -8,18 +8,15 @@ preventing the LLM from inventing columns or operations that don't apply.
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
+from tools.config import get_env
 from tools.observability import log_node
 
-load_dotenv()
-
-_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+_MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
 
 
 def _strip_thinking(text: str) -> str:

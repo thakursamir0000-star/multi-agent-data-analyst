@@ -21,16 +21,14 @@ if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
 
 import base64
-import os
 import uuid
 from io import BytesIO
 from typing import Any
 
 import streamlit as st
-from dotenv import load_dotenv
 from langgraph.types import Command
 
-load_dotenv()
+from tools.config import get_env
 
 # ── Page Configuration ──────────────────────────────────────────────
 
@@ -430,7 +428,7 @@ def main():
         )
 
         if uploaded_file and st.session_state.df is None:
-            max_mb = int(os.getenv("MAX_UPLOAD_MB", "50"))
+                max_mb = int(get_env("MAX_UPLOAD_MB", "50"))
             if uploaded_file.size > max_mb * 1024 * 1024:
                 st.error(f"File too large. Maximum size: {max_mb} MB")
             else:

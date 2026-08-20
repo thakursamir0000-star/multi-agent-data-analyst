@@ -11,10 +11,8 @@ Uses MemorySaver checkpointer for pause/resume support.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
-from dotenv import load_dotenv
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
 
@@ -24,10 +22,9 @@ from agents.critic import critic_node
 from agents.human_input import human_input_node
 from agents.planner import planner_node
 from agents.state import AgentState
+from tools.config import get_env
 
-load_dotenv()
-
-_MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))
+_MAX_RETRIES = int(get_env("MAX_RETRIES", "2"))
 
 
 # ── Routing Functions ───────────────────────────────────────────────

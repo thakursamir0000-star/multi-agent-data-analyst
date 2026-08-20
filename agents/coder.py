@@ -9,19 +9,16 @@ upstream to the Critic.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
-from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
+from tools.config import get_env
 from tools.observability import log_node
 from tools.sandbox import run_code
 
-load_dotenv()
-
-_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+_MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
 
 CODER_SYSTEM_PROMPT = """\
 /no_think
