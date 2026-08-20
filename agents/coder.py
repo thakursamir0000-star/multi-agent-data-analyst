@@ -21,7 +21,7 @@ from tools.sandbox import run_code
 
 load_dotenv()
 
-_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
 
 CODER_SYSTEM_PROMPT = """\
 You are the **Coder** agent in a multi-agent data analysis system.

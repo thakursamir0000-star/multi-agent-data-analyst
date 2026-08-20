@@ -19,7 +19,7 @@ from tools.observability import log_node
 
 load_dotenv()
 
-_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
 
 PLANNER_SYSTEM_PROMPT = """\
 You are the **Planner** agent in a multi-agent data analysis system.

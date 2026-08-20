@@ -20,7 +20,7 @@ from tools.observability import log_node
 
 load_dotenv()
 
-_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
 _MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))
 
 CRITIC_SYSTEM_PROMPT = """\
