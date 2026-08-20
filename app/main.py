@@ -428,7 +428,7 @@ def main():
         )
 
         if uploaded_file and st.session_state.df is None:
-                max_mb = int(get_env("MAX_UPLOAD_MB", "50"))
+            max_mb = int(get_env("MAX_UPLOAD_MB", "50"))
             if uploaded_file.size > max_mb * 1024 * 1024:
                 st.error(f"File too large. Maximum size: {max_mb} MB")
             else:
