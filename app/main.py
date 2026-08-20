@@ -178,18 +178,10 @@ _init_session_state()
 # ── Helper Functions ────────────────────────────────────────────────
 
 def _load_graph():
-    """Build the compiled graph with the current DataFrame.
-
-    Always rebuilds when graph is None (set to None on each new query)
-    so the Coder node captures the current DataFrame via closure.
-    """
+    """Build the compiled graph with the current DataFrame."""
     if st.session_state.graph is None:
-        import importlib
-        import agents.coder as _coder_mod
-        import agents.graph as _graph_mod
-        importlib.reload(_coder_mod)
-        importlib.reload(_graph_mod)
-        st.session_state.graph = _graph_mod.build_graph(df=st.session_state.df)
+        from agents.graph import build_graph
+        st.session_state.graph = build_graph(df=st.session_state.df)
     return st.session_state.graph
 
 
@@ -247,8 +239,8 @@ def _render_trace_sidebar() -> None:
                     st.error(error)
 
 
-def _run_analysis(query: str) -> None:
-    """Run the full multi-agent analysis pipeline."""
+def _run_analysis(query: str) -> bool:
+    """Run the full multi-agent analysis pipeline. Returns True on success."""
     graph = _load_graph()
     thread_id = st.session_state.thread_id
 
@@ -313,7 +305,7 @@ def _run_analysis(query: str) -> None:
         except Exception as e:
             status.update(label=f"❌ Error: {str(e)}", state="error")
             st.error(f"Analysis failed: {str(e)}")
-            return
+            return False
 
     # Display results
     if final_state:
@@ -336,6 +328,7 @@ def _run_analysis(query: str) -> None:
                             "plot_base64": co["plot_base64"],
                         }
                     )
+    return True
 
 
 def _resume_with_human_input(answer: str) -> None:
@@ -549,9 +542,10 @@ def main():
                     st.markdown(query)
 
                 with st.chat_message("assistant"):
-                    _run_analysis(query)
+                    success = _run_analysis(query)
 
-                st.rerun()
+                if success:
+                    st.rerun()
     else:
         st.info("👆 Upload a CSV or Excel file to get started.")
 
