@@ -18,9 +18,21 @@ from tools.observability import log_node
 
 load_dotenv()
 
-_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
+
+def _strip_thinking(text: str) -> str:
+    """Remove <thinking>...</thinking> blocks (closed or unclosed) from LLM output."""
+    import re
+    text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
+    # Handle unclosed thinking tags: strip from <think> to end of text
+    if "<thinking>" in text:
+        idx = text.find("<thinking>")
+        text = text[:idx].strip()
+    return text
 
 ANALYST_SYSTEM_PROMPT = """\
+/no_think
 You are the **Analyst** agent in a multi-agent data analysis system.
 
 Your job: given a set of code execution results (stdout outputs, any errors),
@@ -90,6 +102,6 @@ def analyst_node(state: dict[str, Any]) -> dict[str, Any]:
     response = llm.invoke(messages)
 
     return {
-        "draft_insight": response.content,
+        "draft_insight": _strip_thinking(response.content),
         "messages": [response],
     }

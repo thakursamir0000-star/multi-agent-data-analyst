@@ -21,9 +21,10 @@ from tools.sandbox import run_code
 
 load_dotenv()
 
-_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 CODER_SYSTEM_PROMPT = """\
+/no_think
 You are the **Coder** agent in a multi-agent data analysis system.
 
 Your job: write Python code using pandas and matplotlib to accomplish
@@ -66,18 +67,30 @@ def _build_coder_prompt(
 
 
 def _extract_code(response_text: str) -> str:
-    """Extract pure Python code from LLM response, stripping markdown fences."""
-    text = response_text.strip()
+    """Extract pure Python code from LLM response, stripping markdown fences,
+    thinking tags, and any surrounding conversational text."""
+    import re
+    text = re.sub(r"<thinking>.*?</thinking>", "", response_text, flags=re.DOTALL).strip()
+    if "<thinking>" in text:
+        idx = text.find("<thinking>")
+        text = text[:idx].strip()
 
-    # Strip markdown code fences
-    if text.startswith("```"):
+    # Find code block between ``` markers (handles surrounding text)
+    if "```" in text:
         lines = text.split("\n")
-        # Remove first line (```python or ```)
-        lines = lines[1:]
-        # Remove last ``` if present
-        if lines and lines[-1].strip() == "```":
-            lines = lines[:-1]
-        text = "\n".join(lines)
+        in_block = False
+        code_lines = []
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                if in_block:
+                    break  # End of code block
+                in_block = True
+                continue
+            if in_block:
+                code_lines.append(line)
+        if code_lines:
+            return "\n".join(code_lines).strip()
 
     return text.strip()
 

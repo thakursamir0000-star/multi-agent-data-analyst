@@ -19,9 +19,20 @@ from tools.observability import log_node
 
 load_dotenv()
 
-_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
+
+def _strip_thinking(text: str) -> str:
+    """Remove <thinking>...</thinking> blocks (closed or unclosed) from LLM output."""
+    import re
+    text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
+    if "<thinking>" in text:
+        idx = text.find("<thinking>")
+        text = text[:idx].strip()
+    return text
 
 PLANNER_SYSTEM_PROMPT = """\
+/no_think
 You are the **Planner** agent in a multi-agent data analysis system.
 
 Your job: given a user's natural-language question and a dataset profile,
@@ -37,10 +48,13 @@ when completed sequentially, will fully answer the question.
 4. If a visualization is needed, include a separate sub-task for it
    (e.g., "Create a bar chart of top 5 categories by revenue").
 5. Limit to 5 sub-tasks maximum. If the query is simple, 1-2 is fine.
-6. Return ONLY a JSON array of strings. No preamble, no explanation.
+6. Output ONLY the JSON array. No thinking, no explanation, no markdown.
 
-## Example output
-["Filter rows where 'region' == 'West'", "Group by 'product', sum 'revenue', sort descending", "Take top 10 results", "Create a horizontal bar chart of the top 10"]
+## Output format
+["task 1", "task 2"]
+
+Example:
+["Group by 'product', sum 'revenue', sort descending", "Take top 5 results", "Create a horizontal bar chart of the top 5"]
 """
 
 
@@ -62,13 +76,19 @@ def _parse_sub_tasks(response_text: str) -> list[str]:
 
     # Strip markdown code fences
     if "```" in text:
-        lines = text.split("```")
-        for segment in lines:
-            segment = segment.strip()
-            if segment.startswith("json"):
-                segment = segment[4:].strip()
-            if segment.startswith("["):
-                text = segment
+        lines = text.split("\n")
+        in_block = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                if in_block:
+                    break
+                in_block = True
+                continue
+            if in_block and stripped.startswith("["):
+                text = "\n".join(
+                    l for l in lines[lines.index(line) :]
+                )
                 break
 
     # Find the JSON array
@@ -80,17 +100,11 @@ def _parse_sub_tasks(response_text: str) -> list[str]:
     try:
         tasks = json.loads(text)
         if isinstance(tasks, list) and all(isinstance(t, str) for t in tasks):
-            return tasks
+            return [t.strip() for t in tasks if len(t.strip()) > 5]
     except json.JSONDecodeError:
         pass
 
-    # Fallback: split by newlines if JSON parsing fails
-    lines = [
-        line.strip().lstrip("0123456789.-) ")
-        for line in response_text.strip().split("\n")
-        if line.strip() and not line.strip().startswith("#")
-    ]
-    return [line for line in lines if len(line) > 10]
+    return []
 
 
 @log_node("Planner")
@@ -119,7 +133,7 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     ]
 
     response = llm.invoke(messages)
-    sub_tasks = _parse_sub_tasks(response.content)
+    sub_tasks = _parse_sub_tasks(_strip_thinking(response.content))
 
     # Ensure at least one task
     if not sub_tasks:

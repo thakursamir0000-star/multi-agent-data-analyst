@@ -20,10 +20,21 @@ from tools.observability import log_node
 
 load_dotenv()
 
-_MODEL = os.getenv("GROQ_MODEL", "qwen/qwen3.6-27b")
+_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 _MAX_RETRIES = int(os.getenv("MAX_RETRIES", "2"))
 
+
+def _strip_thinking(text: str) -> str:
+    """Remove <thinking>...</thinking> blocks (closed or unclosed) from LLM output."""
+    import re
+    text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
+    if "<thinking>" in text:
+        idx = text.find("<thinking>")
+        text = text[:idx].strip()
+    return text
+
 CRITIC_SYSTEM_PROMPT = """\
+/no_think
 You are the **Critic** agent in a multi-agent data analysis system.
 
 Your job: cross-check the Analyst's insight against the actual code
@@ -75,13 +86,19 @@ def _parse_critic_response(response_text: str) -> dict[str, Any]:
 
     # Strip markdown fences
     if "```" in text:
-        lines = text.split("```")
-        for segment in lines:
-            segment = segment.strip()
-            if segment.startswith("json"):
-                segment = segment[4:].strip()
-            if segment.startswith("{"):
-                text = segment
+        lines = text.split("\n")
+        in_block = False
+        for line in lines:
+            stripped = line.strip()
+            if stripped.startswith("```"):
+                if in_block:
+                    break
+                in_block = True
+                continue
+            if in_block and stripped.startswith("{"):
+                text = "\n".join(
+                    l for l in lines[lines.index(line) :]
+                )
                 break
 
     # Find JSON object
@@ -124,7 +141,7 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     ]
 
     response = llm.invoke(messages)
-    result = _parse_critic_response(response.content)
+    result = _parse_critic_response(_strip_thinking(response.content))
 
     verdict = result.get("verdict", "PASS").upper()
     issues = result.get("issues", [])
