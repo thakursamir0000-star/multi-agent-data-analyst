@@ -24,7 +24,14 @@ from agents.planner import planner_node
 from agents.state import AgentState
 from tools.config import get_env
 
-_MAX_RETRIES = int(get_env("MAX_RETRIES", "2"))
+_MAX_RETRIES = None
+
+
+def _get_max_retries():
+    global _MAX_RETRIES
+    if _MAX_RETRIES is None:
+        _MAX_RETRIES = int(get_env("MAX_RETRIES", "2"))
+    return _MAX_RETRIES
 
 
 # ── Routing Functions ───────────────────────────────────────────────

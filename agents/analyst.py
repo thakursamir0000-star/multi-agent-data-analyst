@@ -15,7 +15,14 @@ from langchain_groq import ChatGroq
 from tools.config import get_env
 from tools.observability import log_node
 
-_MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
+_MODEL = None
+
+
+def _get_model():
+    global _MODEL
+    if _MODEL is None:
+        _MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
+    return _MODEL
 
 
 def _strip_thinking(text: str) -> str:
@@ -78,7 +85,7 @@ def analyst_node(state: dict[str, Any]) -> dict[str, Any]:
     Reads: user_query, code_outputs
     Writes: draft_insight, messages
     """
-    llm = ChatGroq(model=_MODEL, temperature=0.3)
+    llm = ChatGroq(model=_get_model(), temperature=0.3)
 
     user_query = state.get("user_query", "")
     code_outputs = state.get("code_outputs", [])

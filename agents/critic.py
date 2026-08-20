@@ -17,8 +17,22 @@ from langchain_groq import ChatGroq
 from tools.config import get_env
 from tools.observability import log_node
 
-_MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
-_MAX_RETRIES = int(get_env("MAX_RETRIES", "2"))
+_MODEL = None
+_MAX_RETRIES = None
+
+
+def _get_model():
+    global _MODEL
+    if _MODEL is None:
+        _MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
+    return _MODEL
+
+
+def _get_max_retries():
+    global _MAX_RETRIES
+    if _MAX_RETRIES is None:
+        _MAX_RETRIES = int(get_env("MAX_RETRIES", "2"))
+    return _MAX_RETRIES
 
 
 def _strip_thinking(text: str) -> str:
@@ -124,7 +138,7 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     Writes: verified_insight OR (critic_feedback + retry_count) OR
             (needs_human_input + human_question)
     """
-    llm = ChatGroq(model=_MODEL, temperature=0.1)
+    llm = ChatGroq(model=_get_model(), temperature=0.1)
 
     draft_insight = state.get("draft_insight", "")
     code_outputs = state.get("code_outputs", [])
@@ -152,7 +166,7 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
         }
 
     # FAIL path
-    if is_ambiguous or retry_count >= _MAX_RETRIES:
+    if is_ambiguous or retry_count >= _get_max_retries():
         # Escalate to human
         question = (
             f"The analysis encountered issues that need your input:\n"

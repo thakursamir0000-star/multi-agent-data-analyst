@@ -16,7 +16,14 @@ from langchain_groq import ChatGroq
 from tools.config import get_env
 from tools.observability import log_node
 
-_MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
+_MODEL = None
+
+
+def _get_model():
+    global _MODEL
+    if _MODEL is None:
+        _MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
+    return _MODEL
 
 
 def _strip_thinking(text: str) -> str:
@@ -111,7 +118,7 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     Reads: user_query, dataframe_profile, human_answer (if re-planning)
     Writes: sub_tasks, current_task_index, messages
     """
-    llm = ChatGroq(model=_MODEL, temperature=0.2)
+    llm = ChatGroq(model=_get_model(), temperature=0.2)
 
     user_query = state["user_query"]
     profile_text = state.get("dataframe_profile", "")

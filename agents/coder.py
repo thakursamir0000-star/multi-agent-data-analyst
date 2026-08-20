@@ -18,7 +18,14 @@ from tools.config import get_env
 from tools.observability import log_node
 from tools.sandbox import run_code
 
-_MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
+_MODEL = None
+
+
+def _get_model():
+    global _MODEL
+    if _MODEL is None:
+        _MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
+    return _MODEL
 
 CODER_SYSTEM_PROMPT = """\
 /no_think
@@ -105,7 +112,7 @@ def coder_node(state: dict[str, Any], *, df=None) -> dict[str, Any]:
         The DataFrame to execute code against. Passed via the graph
         wrapper closure — NOT through LangGraph state.
     """
-    llm = ChatGroq(model=_MODEL, temperature=0.1)
+    llm = ChatGroq(model=_get_model(), temperature=0.1)
 
     sub_tasks = state.get("sub_tasks", [])
     task_idx = state.get("current_task_index", 0)
