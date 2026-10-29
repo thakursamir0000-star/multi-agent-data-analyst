@@ -315,11 +315,12 @@ Each log entry contains:
 | Latency p50 / p95, tokens / question | Cost of an answer |
 
 ```bash
-python evaluation/benchmark.py --dry-run   # questions + ground truth, no LLM
-python evaluation/benchmark.py             # full run, needs GROQ_API_KEY
+python evaluation/benchmark.py --dry-run                     # questions + ground truth, no LLM
+python evaluation/benchmark.py                               # full run, needs GROQ_API_KEY
+python evaluation/benchmark.py --model openai/gpt-oss-20b    # benchmark another model
 ```
 
-CI runs it on every push when the repository has a `GROQ_API_KEY` secret and posts the table in the run summary.
+A full run uses a large share of Groq's free daily token allowance for one model, so CI doesn't spend it on every push: start it from **Actions → CI → Run workflow** (pick the model there), or let the weekly scheduled run do it; the table appears in the run summary. Per-minute rate limits are waited out, a daily limit stops the run early with a note, and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%.
 
 **Results:** *added after the first CI run.*
 

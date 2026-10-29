@@ -100,6 +100,66 @@ def test_clarification_and_errors_count_as_misses(monkeypatch):
     assert failed["error"] == "RuntimeError: rate limited" and not failed["correct"]
 
 
+DAILY = ("RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit reached for model "
+         "openai/gpt-oss-120b ... on tokens per day (TPD): Limit 200000, Used 199114, Requested 1125. "
+         "Please try again in 1m43.248s.'}}")
+MINUTE = ("RateLimitError: Error code: 429 - {'error': {'message': 'Rate limit reached ... on tokens "
+          "per minute (TPM): Limit 8000, Used 7900, Requested 900. Please try again in 6.5s.'}}")
+
+
+def test_rate_limit_classification():
+    assert benchmark.rate_limit_kind(DAILY) == "daily"
+    assert benchmark.rate_limit_kind(MINUTE) == "minute"
+    assert benchmark.rate_limit_kind("ValueError: bad") is None
+    assert benchmark.rate_limit_kind(None) is None
+    assert benchmark.retry_after_seconds(DAILY) == pytest.approx(103.248)
+    assert benchmark.retry_after_seconds(MINUTE) == pytest.approx(6.5)
+    assert benchmark.retry_after_seconds("no hint") == 30.0
+
+
+def _result(case, error=None, correct=True):
+    return {"id": case["id"], "question": case["question"], "answer": "" if error else "ok",
+            "correct": correct and not error, "verified": not error, "escalated": False, "retries": 0,
+            "steps": 1, "core_tool_steps": 1, "tokens": 10, "latency_s": 1.0, "error": error}
+
+
+CASES = [{"id": i, "question": f"q{i}"} for i in range(1, 6)]
+
+
+def test_daily_limit_stops_the_run():
+    calls = []
+
+    def runner(case):
+        calls.append(case["id"])
+        return _result(case, error=DAILY if case["id"] == 3 else None)
+
+    results, reason = benchmark.run_all(CASES, runner, sleep=lambda s: pytest.fail("no waiting on daily"))
+    assert calls == [1, 2, 3] and len(results) == 3
+    assert "daily token limit" in reason and "2 not run" in reason
+
+
+def test_minute_limit_is_waited_out_once():
+    attempts, waits = {}, []
+
+    def runner(case):
+        attempts[case["id"]] = attempts.get(case["id"], 0) + 1
+        first_try_of_2 = case["id"] == 2 and attempts[2] == 1
+        return _result(case, error=MINUTE if first_try_of_2 else None)
+
+    results, reason = benchmark.run_all(CASES, runner, sleep=waits.append)
+    assert reason is None and attempts[2] == 2 and waits == [pytest.approx(8.5)]
+    assert all(r["error"] is None for r in results)
+
+
+def test_errors_are_excluded_from_quality_metrics():
+    results = [_result(CASES[0]), _result(CASES[1], correct=False), _result(CASES[2], error=DAILY)]
+    s = summarize(results, planned=5)
+    assert (s["questions"], s["scored"], s["errors"]) == (5, 2, 1)
+    assert s["accuracy"] == 0.5  # 1 of the 2 scored, not 1 of 3
+    table = benchmark.markdown(s, results, "m", "Groq's daily token limit was reached")
+    assert "2 of 5 questions scored" in table and "⚠️ Groq's daily token limit" in table
+
+
 def test_summary_metrics():
     base = {"answer": "", "escalated": False, "retries": 0, "steps": 2, "core_tool_steps": 1,
             "tokens": 100, "latency_s": 2.0, "error": None}

@@ -3,7 +3,12 @@ End-to-end benchmark for the multi-agent pipeline.
 
     python evaluation/benchmark.py              # run all questions (needs GROQ_API_KEY)
     python evaluation/benchmark.py --limit 5    # first 5 questions
+    python evaluation/benchmark.py --model openai/gpt-oss-20b
     python evaluation/benchmark.py --dry-run    # print questions + ground truth, no LLM
+
+A per-minute Groq rate limit is waited out once per question; a daily limit
+stops the run (the remaining questions can't succeed until it resets), and a
+run in which no question could be scored exits with an error.
 
 Each question about sample_data/sales_sample.csv has a ground truth computed
 directly in pandas. The full graph (planner → coder → analyst → critic) answers
@@ -161,31 +166,77 @@ def run_case(case: dict, registry: DatasetRegistry, dataset_id: str, profile_tex
     }
 
 
-def summarize(cases: list[dict]) -> dict:
+_RETRY_AFTER = re.compile(r"try again in (?:(\d+)m)?([\d.]+)s")
+
+
+def rate_limit_kind(error: str | None) -> str | None:
+    """"daily" / "minute" for a Groq rate-limit error, else None."""
+    if not error or not ("429" in error or "rate limit" in error.lower()):
+        return None
+    return "daily" if "per day" in error else "minute"
+
+
+def retry_after_seconds(error: str, default: float = 30.0) -> float:
+    match = _RETRY_AFTER.search(error)
+    return int(match.group(1) or 0) * 60 + float(match.group(2)) if match else default
+
+
+def run_all(cases: list[dict], runner, sleep=time.sleep, max_wait: float = 120.0) -> tuple[list[dict], str | None]:
+    """Run every case; wait out per-minute limits once, stop at a daily limit.
+
+    Returns (results, stop_reason). After a daily limit the remaining
+    questions can't succeed until the quota resets, so they aren't attempted.
+    """
+    results = []
+    for case in cases:
+        result = runner(case)
+        if rate_limit_kind(result["error"]) == "minute":
+            wait = min(retry_after_seconds(result["error"]) + 2, max_wait)
+            print(f"   per-minute rate limit; waiting {wait:.0f}s and retrying #{case['id']}")
+            sleep(wait)
+            result = runner(case)
+        print(f"#{result['id']:>2} {'OK  ' if result['correct'] else 'MISS'} {result['latency_s']:>5.1f}s  {case['question']}")
+        results.append(result)
+        if rate_limit_kind(result["error"]) == "daily":
+            skipped = len(cases) - len(results)
+            return results, (f"Groq's daily token limit was reached after {len(results)} question(s); "
+                             f"{skipped} not run. Rerun after the quota resets or with --model <another model>.")
+    return results, None
+
+
+def summarize(cases: list[dict], planned: int | None = None) -> dict:
+    """Quality metrics over the questions that got an answer from the pipeline;
+    infrastructure errors (API/rate limits) are counted separately."""
     def mean(values):
         return round(float(np.mean(values)), 3) if values else None
 
-    steps = sum(c["steps"] for c in cases)
-    latencies = [c["latency_s"] for c in cases]
+    scored = [c for c in cases if not c["error"]]
+    steps = sum(c["steps"] for c in scored)
+    latencies = [c["latency_s"] for c in scored]
     return {
-        "questions": len(cases),
-        "accuracy": mean([float(c["correct"]) for c in cases]),
-        "verified_rate": mean([float(c["verified"]) for c in cases]),
-        "verified_but_wrong": sum(c["verified"] and not c["correct"] for c in cases),
-        "escalation_rate": mean([float(c["escalated"]) for c in cases]),
-        "mean_retries": mean([c["retries"] for c in cases]),
-        "core_tool_share": round(sum(c["core_tool_steps"] for c in cases) / steps, 3) if steps else None,
+        "questions": planned if planned is not None else len(cases),
+        "scored": len(scored),
+        "accuracy": mean([float(c["correct"]) for c in scored]),
+        "verified_rate": mean([float(c["verified"]) for c in scored]),
+        "verified_but_wrong": sum(c["verified"] and not c["correct"] for c in scored),
+        "escalation_rate": mean([float(c["escalated"]) for c in scored]),
+        "mean_retries": mean([c["retries"] for c in scored]),
+        "core_tool_share": round(sum(c["core_tool_steps"] for c in scored) / steps, 3) if steps else None,
         "latency_s_p50": round(float(np.percentile(latencies, 50)), 2) if latencies else None,
         "latency_s_p95": round(float(np.percentile(latencies, 95)), 2) if latencies else None,
-        "tokens_per_question": mean([c["tokens"] for c in cases]),
-        "errors": sum(1 for c in cases if c["error"]),
+        "tokens_per_question": mean([c["tokens"] for c in scored]),
+        "errors": len(cases) - len(scored),
     }
 
 
-def markdown(summary: dict, cases: list[dict], model: str) -> str:
+def markdown(summary: dict, cases: list[dict], model: str, stop_reason: str | None = None) -> str:
     s = summary
     lines = [
-        f"**Model:** `{model}` · {s['questions']} questions on `sales_sample.csv`", "",
+        f"**Model:** `{model}` · {s['scored']} of {s['questions']} questions scored on `sales_sample.csv`", "",
+    ]
+    if stop_reason:
+        lines += [f"> ⚠️ {stop_reason}", ""]
+    lines += [
         "| Accuracy | Verified by critic | Verified but wrong | Clarification requests | Mean retries | "
         "Core-tool share | Latency p50 / p95 | Tokens / question | Errors |",
         "|---|---|---|---|---|---|---|---|---|",
@@ -207,8 +258,11 @@ def markdown(summary: dict, cases: list[dict], model: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--limit", type=int, help="only the first N questions")
+    parser.add_argument("--model", help="Groq model to benchmark (overrides GROQ_MODEL)")
     parser.add_argument("--dry-run", action="store_true", help="print questions and ground truth only")
     args = parser.parse_args()
+    if args.model:
+        os.environ["GROQ_MODEL"] = args.model  # before agents.llm reads it
 
     df = pd.read_csv(DATA_FILE)
     cases = build_cases(df)[: args.limit]
@@ -228,21 +282,21 @@ def main() -> None:
     dataset_id = registry.register_dataframe(df, "sales_sample").dataset_id
     profile_text = registry.get_profile_text(dataset_id)
 
-    results = []
-    for case in cases:
-        result = run_case(case, registry, dataset_id, profile_text)
-        print(f"#{result['id']:>2} {'OK  ' if result['correct'] else 'MISS'} {result['latency_s']:>5.1f}s  {case['question']}")
-        results.append(result)
+    results, stop_reason = run_all(cases, lambda case: run_case(case, registry, dataset_id, profile_text))
 
-    summary = summarize(results)
-    table = markdown(summary, results, get_model())
+    summary = summarize(results, planned=len(cases))
+    table = markdown(summary, results, get_model(), stop_reason)
     print("\n" + table)
     RESULTS_DIR.mkdir(exist_ok=True)
     (RESULTS_DIR / "benchmark.json").write_text(
-        json.dumps({"summary": summary, "cases": results}, indent=2, default=str), encoding="utf-8")
+        json.dumps({"summary": summary, "stop_reason": stop_reason, "cases": results}, indent=2, default=str),
+        encoding="utf-8")
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
             f.write("## Multi-agent benchmark\n\n" + table + "\n")
+    if summary["scored"] == 0:
+        # Nothing was measured: fail loudly instead of reporting accuracy 0.0 as a pass.
+        raise SystemExit("No question could be scored (see errors above).")
 
 
 if __name__ == "__main__":
