@@ -151,6 +151,7 @@ multi-agent-data-analyst/
 │   └── errors.py              # CoreError hierarchy
 ├── mcp_server/                # MCP server (python -m mcp_server)
 │   ├── server.py              # create_server + CLI (stdio / Streamable HTTP)
+│   ├── smoke.py               # Real-client smoke test for a running HTTP server
 │   ├── tools.py               # Tool adapters over core/, sandbox and graph
 │   ├── resources.py           # dataset://…/schema, trace://… resources
 │   ├── prompts.py             # Reusable analysis prompts
@@ -163,7 +164,9 @@ multi-agent-data-analyst/
 ├── app/
 │   └── main.py                # Streamlit frontend
 ├── evaluation/
-│   └── benchmark.py           # End-to-end benchmark with pandas ground truth
+│   ├── benchmark.py           # End-to-end benchmark with pandas ground truth
+│   └── pricing.json           # $/1M tokens per model, for cost per question
+├── Dockerfile                 # MCP server over HTTP (non-root, remote-safe defaults)
 ├── .github/workflows/ci.yml   # Lint, tests, benchmark
 ├── tests/                     # Unit & integration tests
 ├── sample_data/               # Demo dataset + generator
@@ -243,6 +246,15 @@ python -m mcp_server                             # stdio: the client starts one 
 python -m mcp_server --http --port 8000          # Streamable HTTP at http://127.0.0.1:8000/mcp
 ```
 
+**Docker** (HTTP, non-root, remote-safe defaults: code execution off, no server files exposed):
+
+```bash
+docker build -t agentai-mcp .
+docker run -p 8000:8000 agentai-mcp                                       # http://localhost:8000/mcp
+docker run -p 8000:8000 -e AGENTAI_MCP_ALLOW_RUN_PANDAS=true agentai-mcp  # trusted clients only
+python -m mcp_server.smoke http://localhost:8000/mcp                      # check a running server
+```
+
 **Claude Desktop** (`claude_desktop_config.json`):
 
 ```json
@@ -274,7 +286,10 @@ python -m mcp_server --http --port 8000          # Streamable HTTP at http://127
 - **Streamable HTTP:** MCP requests carry no client identity, so a client calls `open_session` and passes the returned unguessable token on every call; each token has its own datasets and traces, and unknown or idle sessions are refused. Code execution is **off** by default (`AGENTAI_MCP_ALLOW_RUN_PANDAS=true` / `AGENTAI_MCP_ALLOW_ANALYZE_QUESTION=true` to enable), server files aren't exposed unless `AGENTAI_DATA_DIR` is set, and uploads are capped.
 - **Remote SQL policy:** over HTTP, `query_sql` also refuses functions that describe the server instead of the data — `current_setting()`, `duckdb_settings()`, `version()`, every `duckdb_*()` / `pragma_*()` function, the session user and the clock (its offset reveals the server's time zone). Local use keeps the standard policy.
 
-The tests in `tests/test_mcp_server.py` drive every tool through the server exactly as a client's requests would, including session isolation between two HTTP clients.
+**Tested with a real client at three levels:**
+- `tests/test_mcp_server.py` drives every tool through the server in-process, including session isolation between two HTTP clients;
+- `tests/test_mcp_stdio.py` starts `python -m mcp_server` as its own process and talks to it with the official MCP client over stdio — the path Claude Desktop uses;
+- `tests/test_mcp_http.py` does the same over Streamable HTTP, and CI's **docker** job builds the image, starts the container and runs the same checks (`mcp_server/smoke.py`) against it.
 
 ---
 
@@ -303,24 +318,31 @@ Each log entry contains:
 
 ## Evaluation
 
-`evaluation/benchmark.py` runs the full graph on 15 questions about `sample_data/sales_sample.csv` — totals, filters, rankings, a correlation, a month-level trend, a profit margin, missing values and a top-3 — whose answers are computed directly in pandas. An answer counts as correct when the final insight states the expected number (normal rounding, `%`, `K`/`M` allowed) or every expected name.
+`evaluation/benchmark.py` runs the full graph on 22 questions about `sample_data/sales_sample.csv` whose answers are computed directly in pandas:
+- **15 basic** — totals, rankings, a correlation, a month-level trend, a profit margin, missing values, a top-3;
+- **7 multi-step** — filter + group + compare, e.g. the top region *in 2025*, the average discount on large orders, the category with the highest margin (two categories are 0.2 points apart), the half-year revenue change.
+
+An answer counts as correct when the final insight states the expected number (normal rounding, `%`, `K`/`M` allowed) or every expected name.
 
 | Metric | Meaning |
 |---|---|
-| Accuracy | Final insight contains the right answer |
+| Accuracy (± spread) | Final insight contains the right answer; with `--repeats`, the spread across runs |
+| Basic / multi-step | Accuracy per question level |
+| Same outcome every run | Share of questions that are always right or always wrong across repeats |
 | Verified by critic / verified but wrong | How often the Critic passed the answer, and how often it passed a wrong one |
 | Clarification requests | Questions that ended in human-in-the-loop instead of an answer |
 | Mean retries | Critic → Coder retries per question |
 | Core-tool share | Steps answered by deterministic tools instead of generated pandas |
-| Latency p50 / p95, tokens / question | Cost of an answer |
+| Latency p50 / p95, tokens and cost per question, cost per correct answer | What an answer costs, from `evaluation/pricing.json` |
 
 ```bash
-python evaluation/benchmark.py --dry-run                     # questions + ground truth, no LLM
-python evaluation/benchmark.py                               # full run, needs GROQ_API_KEY
-python evaluation/benchmark.py --model openai/gpt-oss-20b    # benchmark another model
+python evaluation/benchmark.py --dry-run                                  # questions + ground truth, no LLM
+python evaluation/benchmark.py                                            # full run, needs GROQ_API_KEY
+python evaluation/benchmark.py --level multi_step --repeats 3             # harder questions, 3 runs each
+python evaluation/benchmark.py --models openai/gpt-oss-120b,openai/gpt-oss-20b   # side-by-side comparison
 ```
 
-A full run uses a large share of Groq's free daily token allowance for one model, so CI doesn't spend it on every push: start it from **Actions → CI → Run workflow** (pick the model there), or let the weekly scheduled run do it; the table appears in the run summary. Per-minute rate limits are waited out, a daily limit stops the run early with a note, and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%.
+A full run uses a large share of Groq's free daily token allowance for one model, so CI doesn't spend it on every push: start it from **Actions → CI → Run workflow** — pick a model or **compare-all**, and 1–3 runs per question — or let the weekly scheduled run do it; the tables appear in the run summary. Per-minute rate limits are waited out, a daily limit stops a model's run early with a note (the next model has its own quota), and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%. Costs use the list prices in `evaluation/pricing.json`; check them against [groq.com/pricing](https://groq.com/pricing) before quoting.
 
 **Results:** *added after the first CI run.*
 
@@ -334,7 +356,7 @@ ruff check .
 python -m pytest tests/
 ```
 
-The suite needs no API key (LLM calls are mocked). It covers the agents and graph routing, the core tools and SQL policies, the sandbox's static checks and its process isolation (timeouts, data copies, no secrets in the child, results that can't be spoofed), the MCP server end to end, and the benchmark's scoring. CI runs lint and tests with the sandbox in process-isolation mode.
+The suite needs no API key (LLM calls are mocked). It covers the agents and graph routing, the core tools and SQL policies, the sandbox's static checks and its process isolation (timeouts, data copies, no secrets in the child, results that can't be spoofed), the MCP server end to end (in-process, and as a real process over stdio and HTTP), and the benchmark's scoring. CI runs lint and tests on two dependency generations (pandas 2 / DuckDB 1 and the latest), builds and smoke-tests the Docker image, and runs the LLM benchmark on demand.
 
 ---
 
