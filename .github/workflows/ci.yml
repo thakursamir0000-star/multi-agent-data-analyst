@@ -14,7 +14,8 @@ jobs:
         include:
           - label: "py3.11, pandas 2, duckdb 1"
             python: "3.11"
-            pins: "pandas>=2.2,<3 duckdb>=1.1,<2"
+            # Each spec is single-quoted: unquoted, the shell reads "<3" and ">=" as redirects.
+            pins: "'pandas>=2.2,<3' 'duckdb>=1.1,<2'"
           - label: "py3.12, latest"
             python: "3.12"
             pins: ""
