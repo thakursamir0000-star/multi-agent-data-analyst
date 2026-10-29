@@ -3,9 +3,13 @@ Sandboxed Code Executor — runs pandas/matplotlib code in a restricted namespac
 
 Security model:
 1. AST pre-scan blocks dangerous function calls (open, exec, eval, compile, __import__).
-2. Custom import function whitelist blocks os, sys, subprocess, etc.
-3. Execution timeout prevents infinite loops.
-4. No access to real builtins beyond a curated safe set.
+2. AST pre-scan blocks file-system access through allowed libraries
+   (pd.read_*, df.to_* with a path, np.load/save, io.open, plt.savefig, ...),
+   dunder / frame introspection, and system modules re-exported as
+   attributes (e.g. matplotlib.os) — including aliased references.
+3. Custom import function whitelist blocks os, sys, subprocess, etc.
+4. Execution timeout prevents infinite loops.
+5. No access to real builtins beyond a curated safe set.
 """
 
 from __future__ import annotations
@@ -111,13 +115,136 @@ BLOCKED_ATTRIBUTE_NAMES = frozenset({
     "__class__",
 })
 
+# Every other dunder attribute is blocked too (e.g. __globals__, which
+# exposes the real builtins); only these harmless ones are allowed.
+ALLOWED_DUNDER_NAMES = frozenset({"__name__", "__doc__"})
+
+# Frame / generator / traceback introspection — walking frames reaches
+# the sandbox's own module globals.
+BLOCKED_INTROSPECTION_NAMES = frozenset({
+    "gi_frame", "gi_code", "gi_yieldfrom",
+    "cr_frame", "cr_code", "cr_await",
+    "ag_frame", "ag_code",
+    "f_back", "f_globals", "f_locals", "f_builtins", "f_code", "f_trace",
+    "tb_frame", "tb_next",
+})
+
+# System modules that allowed libraries re-export as attributes, e.g.
+# matplotlib.os, json.codecs, statistics.random._os, pd.core.generic.gc.
+# Leading underscores are stripped before matching.
+BLOCKED_MODULE_ATTRIBUTES = frozenset({
+    "os", "nt", "posix", "ntpath", "posixpath", "genericpath",
+    "sys", "subprocess", "shutil", "pathlib", "glob", "tempfile",
+    "importlib", "pkgutil", "zipimport", "runpy", "builtins", "ctypes",
+    "pickle", "shelve", "marshal", "codecs", "fileinput", "mmap",
+    "zipfile", "tarfile", "gzip", "bz2", "lzma",
+    "socket", "urllib", "webbrowser", "multiprocessing", "threading",
+    "signal", "gc", "inspect", "traceback", "linecache", "tokenize",
+    "winapi", "winreg", "msvcrt",
+})
+
+# pandas writers that always target a file (readers: see BLOCKED_IO_PREFIXES).
+BLOCKED_PANDAS_WRITERS = frozenset({
+    "to_pickle", "to_parquet", "to_feather", "to_hdf", "to_sql",
+    "to_stata", "to_excel", "to_orc", "to_clipboard", "to_gbq",
+})
+
+# Serializers that return a string when called without a path. Allowed only
+# as a direct, pathless call: ``print(df.to_csv(index=False))``.
+PATH_OPTIONAL_WRITERS = frozenset({
+    "to_csv", "to_json", "to_string", "to_html", "to_markdown",
+    "to_latex", "to_xml",
+})
+_PATH_KEYWORDS = frozenset({"path_or_buf", "path_or_buffer", "buf", "path"})
+
+# File-system access reachable through pandas, NumPy, io and matplotlib.
+# Blocked as attribute references (calls *and* aliases such as
+# ``f = io.open``), as imported names, and as parts of import paths.
+BLOCKED_IO_NAMES = BLOCKED_PANDAS_WRITERS | frozenset({
+    # pandas
+    "ExcelWriter", "ExcelFile", "HDFStore", "show_versions",
+    "io",  # pandas.io (file handles, pickle, parsers)
+    # NumPy
+    "load", "save", "savez", "savez_compressed", "savetxt", "loadtxt",
+    "genfromtxt", "fromfile", "fromregex", "tofile", "dump", "memmap",
+    "open_memmap", "write_array", "DataSource", "npyio", "ctypeslib",
+    "f2py",
+    # io
+    "open", "FileIO", "open_code",
+    # matplotlib
+    "savefig", "imread", "imsave", "cbook", "animation", "backends",
+    "PdfPages", "rc_file",
+})
+BLOCKED_IO_PREFIXES = ("read_", "print_")  # pd.read_*, canvas.print_png()
+
+# Dynamic-execution builtins that must not be referenced as attributes
+# either (e.g. ``e = pd.eval``); calls are caught by BLOCKED_FUNCTION_NAMES.
+BLOCKED_CALLABLE_ATTRIBUTES = frozenset({
+    "exec", "eval", "compile", "execfile", "breakpoint", "input",
+    "globals", "locals", "vars", "getattr", "setattr", "delattr",
+})
+
+_INTERNALS_HINT = (
+    "interpreter internals and system modules are not available in the sandbox"
+)
+_FILE_IO_HINT = (
+    "reading or writing files is not allowed; work with the provided `df` "
+    "(for a DataFrame column, use df['<name>'] instead of attribute access)"
+)
+
 DEFAULT_TIMEOUT_SECONDS = 30
 
 
 # ── AST Security Scanner ────────────────────────────────────────────
 
+def _blocked_name_reason(name: str) -> str | None:
+    """Return why an attribute or imported name is blocked, or None if allowed."""
+    if name in BLOCKED_ATTRIBUTE_NAMES or name in BLOCKED_INTROSPECTION_NAMES:
+        return _INTERNALS_HINT
+    if (
+        name.startswith("__")
+        and name.endswith("__")
+        and name not in ALLOWED_DUNDER_NAMES
+    ):
+        return _INTERNALS_HINT
+    bare = name.lstrip("_")
+    if bare in BLOCKED_MODULE_ATTRIBUTES:
+        return _INTERNALS_HINT
+    if bare in BLOCKED_IO_NAMES or bare.startswith(BLOCKED_IO_PREFIXES):
+        return _FILE_IO_HINT
+    if name in PATH_OPTIONAL_WRITERS:
+        return (
+            f"call it directly without a path to get a string, "
+            f"e.g. print(df.{name}())"
+        )
+    if name in BLOCKED_CALLABLE_ATTRIBUTES:
+        return "dynamic code execution is not allowed"
+    return None
+
+
+def _is_none(node: ast.AST) -> bool:
+    return isinstance(node, ast.Constant) and node.value is None
+
+
+def _is_pathless_call(node: ast.Call) -> bool:
+    """True if a serializer call has no path: no positional args, no
+    ``**kwargs`` unpacking, and no path keyword (other than ``None``)."""
+    if any(not _is_none(arg) for arg in node.args):
+        return False
+    for kw in node.keywords:
+        if kw.arg is None:  # **kwargs unpacking
+            return False
+        if kw.arg in _PATH_KEYWORDS and not _is_none(kw.value):
+            return False
+    return True
+
+
 class _ASTSecurityVisitor(ast.NodeVisitor):
     """Walks the AST and raises SecurityError for forbidden patterns."""
+
+    def __init__(self) -> None:
+        # ids of Attribute nodes vetted as pathless serializer calls
+        self._allowed_attributes: set[int] = set()
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
@@ -127,6 +254,18 @@ class _ASTSecurityVisitor(ast.NodeVisitor):
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         if node.module:
             self._check_module(node.module, node)
+        for alias in node.names:
+            if alias.name == "*":
+                raise SecurityError(
+                    f"Blocked import: 'from {node.module} import *' "
+                    f"at line {node.lineno}"
+                )
+            reason = _blocked_name_reason(alias.name)
+            if reason:
+                raise SecurityError(
+                    f"Blocked import: '{alias.name}' from '{node.module}' "
+                    f"at line {node.lineno}. {reason}"
+                )
         self.generic_visit(node)
 
     def visit_Call(self, node: ast.Call) -> None:
@@ -144,17 +283,43 @@ class _ASTSecurityVisitor(ast.NodeVisitor):
                     f"Blocked attribute call: '.{node.func.attr}()' "
                     f"at line {node.lineno}"
                 )
+            # df.to_csv() is fine (returns a string); df.to_csv("x.csv") is not
+            if node.func.attr in PATH_OPTIONAL_WRITERS:
+                if not _is_pathless_call(node):
+                    raise SecurityError(
+                        f"Blocked file write: '.{node.func.attr}()' with a "
+                        f"path or buffer at line {node.lineno}. Call it "
+                        f"without a path to get a string, e.g. "
+                        f"print(df.{node.func.attr}())"
+                    )
+                self._allowed_attributes.add(id(node.func))
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
-        if node.attr in BLOCKED_ATTRIBUTE_NAMES:
-            raise SecurityError(
-                f"Blocked attribute access: '.{node.attr}' "
-                f"at line {node.lineno}"
-            )
+        # Checked on every reference, not just calls, so aliases such as
+        # `f = io.open` or `g = df.to_csv` are caught too.
+        if id(node) not in self._allowed_attributes:
+            reason = _blocked_name_reason(node.attr)
+            if reason:
+                raise SecurityError(
+                    f"Blocked attribute access: '.{node.attr}' "
+                    f"at line {node.lineno}. {reason}"
+                )
         self.generic_visit(node)
 
-    def _check_module(self, module_name: str, node: ast.AST) -> None:
+    def visit_Constant(self, node: ast.Constant) -> None:
+        # pandas can invoke methods by name, e.g. df.agg("to_csv", 0, path)
+        if isinstance(node.value, str) and (
+            node.value in BLOCKED_PANDAS_WRITERS
+            or node.value in PATH_OPTIONAL_WRITERS
+        ):
+            raise SecurityError(
+                f"Blocked method name string: '{node.value}' "
+                f"at line {node.lineno}. Calling file I/O methods by name "
+                f"is not allowed."
+            )
+
+    def _check_module(self, module_name: str, node: ast.stmt) -> None:
         # Check the module and all parent packages
         parts = module_name.split(".")
         for i in range(len(parts)):
@@ -163,6 +328,14 @@ class _ASTSecurityVisitor(ast.NodeVisitor):
                 raise SecurityError(
                     f"Blocked import: '{module_name}' "
                     f"at line {node.lineno}"
+                )
+        # Submodules are checked like attributes, e.g. pandas.io, numpy.ctypeslib
+        for part in parts[1:]:
+            reason = _blocked_name_reason(part)
+            if reason:
+                raise SecurityError(
+                    f"Blocked import: '{module_name}' "
+                    f"at line {node.lineno}. {reason}"
                 )
         # Also check against the whitelist
         root_module = parts[0]

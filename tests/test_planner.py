@@ -36,6 +36,22 @@ class TestParseSubTasks:
         assert len(result) == 3
         assert "Group by category" in result[0]
 
+    def test_bulleted_list_fallback(self):
+        text = "Plan:\n- Group by 'region' and sum 'revenue'\n* Sort the totals descending"
+        result = _parse_sub_tasks(text)
+        assert result == [
+            "Group by 'region' and sum 'revenue'",
+            "Sort the totals descending",
+        ]
+
+    def test_numbered_list_with_brackets_fallback(self):
+        text = "1. Select df[['product', 'revenue']]\n2) Sum 'revenue' by 'product'"
+        result = _parse_sub_tasks(text)
+        assert result == [
+            "Select df[['product', 'revenue']]",
+            "Sum 'revenue' by 'product'",
+        ]
+
     def test_empty_response(self):
         result = _parse_sub_tasks("")
         assert result == []

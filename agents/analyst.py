@@ -1,7 +1,7 @@
 """
 Analyst Node — synthesizes code outputs into plain-English insights.
 
-Takes the accumulated code_outputs (stdout, errors, plots) and produces
+Takes the current attempt's code_outputs (stdout, errors, plots) and produces
 a cohesive, data-backed narrative that a non-technical user can understand.
 """
 
@@ -12,28 +12,8 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from tools.config import get_env
-from tools.observability import log_node
-
-_MODEL = None
-
-
-def _get_model():
-    global _MODEL
-    if _MODEL is None:
-        _MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
-    return _MODEL
-
-
-def _strip_thinking(text: str) -> str:
-    """Remove <thinking>...</thinking> blocks (closed or unclosed) from LLM output."""
-    import re
-    text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
-    # Handle unclosed thinking tags: strip from <think> to end of text
-    if "<thinking>" in text:
-        idx = text.find("<thinking>")
-        text = text[:idx].strip()
-    return text
+from agents.llm import count_tokens, get_model, strip_thinking
+from tools.observability import TOKEN_USAGE_KEY, log_node
 
 ANALYST_SYSTEM_PROMPT = """\
 /no_think
@@ -61,7 +41,13 @@ def _format_code_outputs(code_outputs: list[dict]) -> str:
     parts = []
     for i, output in enumerate(code_outputs):
         parts.append(f"### Sub-task {i + 1}: {output.get('task', 'N/A')}")
-        parts.append(f"**Code:**\n```python\n{output.get('code', '')}\n```")
+        if output.get("tool"):
+            # Answered by a deterministic core tool, not generated code
+            parts.append(
+                f"**Tool call ({output['tool']}):**\n```json\n{output.get('code', '')}\n```"
+            )
+        else:
+            parts.append(f"**Code:**\n```python\n{output.get('code', '')}\n```")
 
         if output.get("error"):
             parts.append(f"**Error:** {output['error']}")
@@ -85,7 +71,7 @@ def analyst_node(state: dict[str, Any]) -> dict[str, Any]:
     Reads: user_query, code_outputs
     Writes: draft_insight, messages
     """
-    llm = ChatGroq(model=_get_model(), temperature=0.3)
+    llm = ChatGroq(model=get_model(), temperature=0.3)
 
     user_query = state.get("user_query", "")
     code_outputs = state.get("code_outputs", [])
@@ -106,6 +92,7 @@ def analyst_node(state: dict[str, Any]) -> dict[str, Any]:
     response = llm.invoke(messages)
 
     return {
-        "draft_insight": _strip_thinking(response.content),
+        "draft_insight": strip_thinking(response.content),
         "messages": [response],
+        TOKEN_USAGE_KEY: count_tokens(response),
     }
