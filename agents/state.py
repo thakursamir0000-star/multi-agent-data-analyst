@@ -18,6 +18,22 @@ def _append_list(existing: list, new: list) -> list:
     return existing + new
 
 
+class NewAttempt(list):
+    """A code_outputs update that starts a fresh list instead of appending.
+
+    The Coder returns its first task's output wrapped in this, so each
+    attempt (a new plan, or a Critic retry) only holds its own results. It
+    is still a plain list of records for anything that reads node updates.
+    """
+
+
+def _append_or_new_attempt(existing: list, new: list) -> list:
+    """Reducer for code_outputs: append, or replace on a NewAttempt."""
+    if isinstance(new, NewAttempt):
+        return list(new)
+    return existing + new
+
+
 class AgentState(TypedDict):
     """Shared state for the multi-agent data analyst graph.
 
@@ -32,8 +48,12 @@ class AgentState(TypedDict):
     current_task_index : int
         Index into sub_tasks indicating which task the Coder should work on.
     code_outputs : list[dict]
-        Accumulated results from the Coder's sandbox executions.
-        Each dict: {task, code, stdout, plot_base64, error}.
+        Results of the current attempt's sub-tasks, in task order.
+        Each dict: {task, task_index, code, tool, stdout, plot_base64, error}.
+        An attempt starts at task 0 — after the Planner (re)plans or the
+        Critic requests a retry — and the Coder then starts a new list
+        (NewAttempt), so outputs from earlier attempts never reach the
+        Analyst or Critic. critic_feedback and retry_count are kept.
     draft_insight : str
         The Analyst's first-pass narrative summary.
     verified_insight : str
@@ -62,7 +82,7 @@ class AgentState(TypedDict):
     current_task_index: int
 
     # Execution
-    code_outputs: Annotated[list[dict], _append_list]
+    code_outputs: Annotated[list[dict], _append_or_new_attempt]
 
     # Analysis
     draft_insight: str

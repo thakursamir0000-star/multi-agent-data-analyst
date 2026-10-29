@@ -35,10 +35,38 @@ class TestParseCriticResponse:
         result = _parse_critic_response(text)
         assert result["verdict"] == "PASS"
 
-    def test_unparseable_fallback(self):
+    def test_unparseable_fails_closed(self):
         text = "This is not JSON at all"
         result = _parse_critic_response(text)
-        assert result["verdict"] == "PASS"  # Safe fallback
+        assert result["verdict"] == "FAIL"
+        assert result["is_ambiguous"] is False
+        assert "could not be parsed" in result["issues"][0]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "",  # empty response
+            '{"verdict": "PASS", "issues": [',  # truncated JSON
+            '{"issues": [], "suggestion": ""}',  # missing verdict
+            '{"verdict": "MAYBE", "issues": []}',  # invalid verdict
+            '{"verdict": true, "issues": []}',  # non-string verdict
+            '{"verdict": null}',  # null verdict
+            '["PASS"]',  # not a JSON object
+        ],
+        ids=["empty", "truncated", "missing", "invalid", "non-string", "null", "array"],
+    )
+    def test_untrusted_output_fails_closed(self, text):
+        assert _parse_critic_response(text)["verdict"] == "FAIL"
+
+    def test_verdict_case_and_whitespace_tolerated(self):
+        result = _parse_critic_response('{"verdict": " pass ", "issues": []}')
+        assert result["verdict"] == "PASS"
+
+    def test_string_issues_and_ambiguity_normalized(self):
+        text = '{"verdict": "FAIL", "issues": "Wrong total", "is_ambiguous": "false"}'
+        result = _parse_critic_response(text)
+        assert result["issues"] == ["Wrong total"]
+        assert result["is_ambiguous"] is False  # only JSON true counts
 
 
 # ── Node Tests ──────────────────────────────────────────────────────
@@ -134,3 +162,42 @@ class TestCriticNode:
 
         result = critic_node(state)
         assert result.get("needs_human_input") is True
+
+    @patch("agents.critic.ChatGroq")
+    def test_malformed_output_takes_retry_path(self, mock_groq_cls):
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = "Looks good to me!"  # no JSON at all
+        mock_llm.invoke.return_value = mock_response
+        mock_groq_cls.return_value = mock_llm
+
+        state = {
+            "draft_insight": "Revenue is $100K",
+            "code_outputs": [{"task": "Sum revenue", "stdout": "100000", "error": None}],
+            "retry_count": 0,
+        }
+
+        result = critic_node(state)
+        assert not result.get("verified_insight")
+        assert result.get("critic_feedback")
+        assert result["retry_count"] == 1
+        assert result["current_task_index"] == 0
+
+    @patch("agents.critic.ChatGroq")
+    def test_missing_verdict_escalates_after_max_retries(self, mock_groq_cls):
+        mock_llm = MagicMock()
+        mock_response = MagicMock()
+        mock_response.content = '{"issues": [], "suggestion": ""}'
+        mock_llm.invoke.return_value = mock_response
+        mock_groq_cls.return_value = mock_llm
+
+        state = {
+            "draft_insight": "Revenue is $100K",
+            "code_outputs": [{"task": "Sum revenue", "stdout": "100000", "error": None}],
+            "retry_count": 2,  # Already at max
+        }
+
+        result = critic_node(state)
+        assert not result.get("verified_insight")
+        assert result.get("needs_human_input") is True
+        assert "invalid verdict" in result["human_question"]

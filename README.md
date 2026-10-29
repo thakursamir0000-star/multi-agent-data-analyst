@@ -134,6 +134,14 @@ Agentai/
 │   ├── critic.py              # Fact-checking & routing
 │   ├── human_input.py         # Human-in-the-loop pause
 │   └── graph.py               # StateGraph wiring & routing
+├── core/                      # Deterministic analysis layer (see above)
+│   ├── datasets.py            # Dataset registry (controlled entry point)
+│   ├── analysis.py            # describe, group_aggregate, correlate, anomalies
+│   ├── charts.py              # make_chart
+│   ├── sql.py                 # Read-only DuckDB queries
+│   ├── tools.py               # run_tool: operations by name on a dataset ID
+│   ├── schemas.py             # Pydantic argument/result models
+│   └── errors.py              # CoreError hierarchy
 ├── tools/                     # Utilities
 │   ├── data_tool.py           # CSV/Excel loader + profiler
 │   ├── sandbox.py             # Restricted code executor
@@ -159,6 +167,48 @@ The sandbox executor enforces three security layers:
 3. **Execution Timeout**: 30-second limit (configurable via `SANDBOX_TIMEOUT_SECONDS`).
 
 > **Note**: While these layers provide defense-in-depth, this is NOT a production-grade sandbox. For production use, consider containerized execution (Docker) or a dedicated sandboxing service.
+
+---
+
+## Deterministic Core Layer
+
+`core/` holds deterministic data-analysis operations that the agents call instead of generating code for common questions. The LLM chooses an operation; tested code computes the exact result:
+
+```
+Common question   → Coder picks a core tool → core function → exact, structured result
+Unusual question  → Coder writes pandas code → sandbox (run_pandas fallback)
+```
+
+This cuts down how much of the numerical work depends on generated Python. The layer has no LLM or MCP code, so the LangGraph app now and an MCP server later can both use it.
+
+**Dataset registry** (`core/datasets.py`). The only way data enters the core layer. `DatasetRegistry` accepts uploads (the Streamlit app registers every upload), in-memory DataFrames, and bare file names from one approved directory. Every dataset gets a stable ID (`ds_` + 16 hex characters, derived from its name and content), and every other call refers to it by that ID. An ID is never treated as a path, and file names are only opened after the registry checks that they resolve to a regular file directly inside the approved directory. Inputs such as `../../secret.txt` or `C:\Users\...` are rejected. The registry exposes metadata, the column schema, the profile and a *copy* of the DataFrame.
+
+**Deterministic tools** (`core/analysis.py`, `core/charts.py`, `core/sql.py`), all reachable by name through `core.tools.run_tool(registry, dataset_id, tool, arguments)`:
+
+| Tool | What it does |
+|------|--------------|
+| `describe` | count, nulls, mean, std, min, quartiles, max for numeric columns |
+| `group_aggregate` | `count` / `sum` / `mean` / `median` / `min` / `max` of a column per group |
+| `correlate` | pairwise Pearson or Spearman correlations |
+| `detect_anomalies` | IQR outliers (default, k = 1.5) or z-score outliers |
+| `make_chart` | bar / line / scatter / histogram as a base64 PNG plus the plotted values |
+| `query_sql` | one read-only DuckDB `SELECT` over the registered datasets |
+
+Arguments are validated by strict Pydantic models, where unknown keys and wrong types are rejected. Results are Pydantic models that serialize to JSON. Tools always work on the dataset exactly as uploaded, never on changes that sandbox code made to `df`.
+
+**DuckDB SQL** (`core/sql.py`). A query must be exactly one statement (counted by DuckDB's own parser, so comments, strings and whitespace cannot hide a second one). Its statement type must be `SELECT`, and it must start with `SELECT`, `WITH`, `FROM`, `VALUES` or `(`. This rejects `INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, `ATTACH`, `COPY`, `PRAGMA`, `SET` and similar statements. File, network and nested-query functions (`read_csv`, `glob`, `query`, …) are refused before execution. Each query then runs in a fresh in-memory database with:
+- external access disabled and no temp directory;
+- Python variable lookup off and the configuration locked;
+- only the registered datasets visible as tables;
+- a row cap and a timeout.
+
+**`run_pandas` fallback.** When no tool fits (derived columns, date parsing, reshaping, custom plots), the Coder writes pandas code that runs in the existing sandbox, unchanged. Tool errors go through the Coder's normal self-correction, so the LLM can retry with a fixed tool call or switch to code. Set `ENABLE_CORE_TOOLS=false` to go back to the code-only Coder.
+
+**Security boundaries.** The registry decides which data exists, and nothing in `core/` opens a path supplied by a caller. SQL can only read registered tables. The sandbox keeps its own AST scan, import whitelist and timeout for generated code.
+
+**Requirements for a future remote (MCP) server.** The current policies are sized for the local app, where the person querying also runs the server:
+- **Registry scope.** A registry is the unit of data visibility: every tool on it, including `query_sql` joins, can read everything registered in it. The Streamlit app keeps one registry per browser session. An MCP server must scope registries per client/session too, and must never share one global registry between unrelated clients.
+- **SQL introspection.** Remote SQL must also block information disclosure through `current_setting()`, `duckdb_settings()`, `version()`/`pragma_platform()` and similar environment/path introspection functions. These are harmless locally but reveal server paths and versions remotely. The preferred approach is an allowlist of analytical functions (see the notes in `core/sql.py`).
 
 ---
 
@@ -206,6 +256,7 @@ python -m pytest tests/test_graph.py -v      # Integration tests
 | `MAX_RETRIES` | `2` | Max Critic → Coder retries |
 | `SANDBOX_TIMEOUT_SECONDS` | `30` | Code execution timeout |
 | `MAX_UPLOAD_MB` | `50` | Maximum file upload size |
+| `ENABLE_CORE_TOOLS` | `true` | Let the Coder use deterministic core tools (`false` = code only) |
 
 ---
 
