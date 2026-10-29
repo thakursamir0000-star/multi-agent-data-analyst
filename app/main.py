@@ -23,7 +23,6 @@ if _PROJECT_ROOT not in sys.path:
 import base64
 import uuid
 from io import BytesIO
-from typing import Any
 
 import streamlit as st
 from langgraph.types import Command
@@ -157,6 +156,8 @@ def _init_session_state() -> None:
     """Initialize all session_state keys on first run."""
     defaults = {
         "df": None,
+        "registry": None,  # core.datasets.DatasetRegistry for this session
+        "dataset_id": None,
         "profile": None,
         "profile_text": "",
         "chat_history": [],
@@ -181,7 +182,11 @@ def _load_graph():
     """Build the compiled graph with the current DataFrame."""
     if st.session_state.graph is None:
         from agents.graph import build_graph
-        st.session_state.graph = build_graph(df=st.session_state.df)
+        st.session_state.graph = build_graph(
+            df=st.session_state.df,
+            registry=st.session_state.registry,
+            dataset_id=st.session_state.dataset_id,
+        )
     return st.session_state.graph
 
 
@@ -206,7 +211,6 @@ def _render_trace_sidebar() -> None:
             node = entry.get("node_name", "Unknown")
             latency = entry.get("latency_ms", 0)
             error = entry.get("error")
-            timestamp = entry.get("timestamp", "")
 
             # Node icon mapping
             icons = {
@@ -221,10 +225,8 @@ def _render_trace_sidebar() -> None:
             # Status badge
             if error:
                 badge = '<span class="badge badge-fail">ERROR</span>'
-                node_class = "trace-node trace-node-fail"
             else:
                 badge = '<span class="badge badge-pass">OK</span>'
-                node_class = "trace-node trace-node-pass"
 
             with st.expander(f"{icon} {node} — {latency:.0f}ms", expanded=False):
                 st.markdown(f"{badge}", unsafe_allow_html=True)
@@ -437,13 +439,21 @@ def main():
                 st.error(f"File too large. Maximum size: {max_mb} MB")
             else:
                 with st.spinner("Loading and profiling dataset..."):
-                    from tools.data_tool import DataTool
+                    from core.datasets import DatasetRegistry
 
                     try:
-                        df = DataTool.load(uploaded_file, file_name=uploaded_file.name)
-                        profile = DataTool.profile(df)
-                        profile_text = DataTool.profile_to_text(profile)
+                        # The registry is the controlled entry point for data:
+                        # it validates, parses (via DataTool) and profiles the
+                        # upload, and gives it a stable dataset ID. It lives in
+                        # session_state, so it is scoped to this browser session.
+                        registry = DatasetRegistry(max_bytes=max_mb * 1024 * 1024)
+                        info = registry.register_upload(uploaded_file, uploaded_file.name)
+                        df = registry.get_dataframe(info.dataset_id)
+                        profile = registry.get_profile(info.dataset_id)
+                        profile_text = registry.get_profile_text(info.dataset_id)
 
+                        st.session_state.registry = registry
+                        st.session_state.dataset_id = info.dataset_id
                         st.session_state.df = df
                         st.session_state.profile = profile
                         st.session_state.profile_text = profile_text

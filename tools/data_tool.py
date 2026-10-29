@@ -7,7 +7,6 @@ column-level profile suitable for injection into LLM prompts.
 
 from __future__ import annotations
 
-import io
 from typing import Any, BinaryIO, Union
 
 import pandas as pd

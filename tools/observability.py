@@ -12,7 +12,7 @@ from __future__ import annotations
 import functools
 import json
 import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -20,6 +20,11 @@ from typing import Any, Callable
 # Log directory (project root / logs)
 _LOG_DIR = Path(__file__).resolve().parent.parent / "logs"
 _LOG_DIR.mkdir(exist_ok=True)
+
+# Private key a node returns with its LLM token usage
+# ({"input_tokens", "output_tokens", "total_tokens"}). log_node pops it
+# before the result reaches LangGraph, so it never enters graph state.
+TOKEN_USAGE_KEY = "_tokens_used"
 
 
 @dataclass
@@ -30,7 +35,9 @@ class TraceEntry:
     node_name: str = ""
     input_summary: str = ""
     output_summary: str = ""
-    tokens_used: int = 0
+    tokens_used: int = 0  # total tokens (input + output)
+    input_tokens: int = 0
+    output_tokens: int = 0
     latency_ms: float = 0.0
     error: str | None = None
 
@@ -78,11 +85,13 @@ def log_node(node_name: str) -> Callable:
             error_msg = None
             output_summary = ""
             result = {}
+            usage: dict[str, int] = {}
 
             try:
                 result = func(state, *args, **kwargs)
                 # Build output summary from returned state updates
                 if isinstance(result, dict):
+                    usage = result.pop(TOKEN_USAGE_KEY, None) or {}
                     keys = list(result.keys())
                     output_summary = _truncate(
                         f"updated_keys={keys}, "
@@ -103,7 +112,9 @@ def log_node(node_name: str) -> Callable:
                     node_name=node_name,
                     input_summary=input_summary,
                     output_summary=output_summary,
-                    tokens_used=0,  # Updated by individual nodes if available
+                    tokens_used=usage.get("total_tokens", 0),
+                    input_tokens=usage.get("input_tokens", 0),
+                    output_tokens=usage.get("output_tokens", 0),
                     latency_ms=round(elapsed_ms, 2),
                     error=error_msg,
                 )

@@ -22,16 +22,7 @@ from agents.critic import critic_node
 from agents.human_input import human_input_node
 from agents.planner import planner_node
 from agents.state import AgentState
-from tools.config import get_env
-
-_MAX_RETRIES = None
-
-
-def _get_max_retries():
-    global _MAX_RETRIES
-    if _MAX_RETRIES is None:
-        _MAX_RETRIES = int(get_env("MAX_RETRIES", "2"))
-    return _MAX_RETRIES
+from core.datasets import DatasetRegistry
 
 
 # ── Routing Functions ───────────────────────────────────────────────
@@ -73,7 +64,12 @@ def route_after_critic(state: AgentState) -> str:
 # ── Graph Construction ──────────────────────────────────────────────
 
 
-def build_graph(df=None) -> StateGraph:
+def build_graph(
+    df=None,
+    *,
+    registry: DatasetRegistry | None = None,
+    dataset_id: str | None = None,
+) -> StateGraph:
     """Construct and compile the multi-agent analysis graph.
 
     Parameters
@@ -81,16 +77,28 @@ def build_graph(df=None) -> StateGraph:
     df : pd.DataFrame, optional
         The DataFrame to make available to the Coder node.
         Passed via closure to bypass LangGraph state serialization.
+    registry, dataset_id : optional
+        A DatasetRegistry and the ID of the dataset being analysed (give
+        both or neither). They let the Coder answer common sub-tasks with
+        deterministic core tools instead of generated code. Without ``df``,
+        the sandbox gets a copy of the registered dataset.
 
     Returns a compiled graph with MemorySaver checkpointer.
     """
+    if (registry is None) != (dataset_id is None):
+        raise ValueError("registry and dataset_id must be given together")
+    if registry is not None:
+        registry.get(dataset_id)  # fail fast on an invalid or unknown ID
+        if df is None:
+            df = registry.get_dataframe(dataset_id)
+
     workflow = StateGraph(AgentState)
 
-    # Wrap coder_node so the DataFrame is injected via closure.
-    # coder_node accepts df as a keyword arg; the @log_node decorator
-    # forwards **kwargs so it reaches the original function.
+    # Wrap coder_node so the DataFrame (and registry) are injected via
+    # closure. coder_node accepts them as keyword args; the @log_node
+    # decorator forwards **kwargs so they reach the original function.
     def _coder_with_df(state: dict[str, Any]) -> dict[str, Any]:
-        return coder_node(state, df=df)
+        return coder_node(state, df=df, registry=registry, dataset_id=dataset_id)
 
     # Add nodes
     workflow.add_node("planner", planner_node)

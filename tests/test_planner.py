@@ -7,7 +7,6 @@ Uses mocked LLM to test parsing and state updates without API calls.
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from agents.planner import _parse_sub_tasks, planner_node
 
@@ -35,6 +34,22 @@ class TestParseSubTasks:
         result = _parse_sub_tasks(text)
         assert len(result) == 3
         assert "Group by category" in result[0]
+
+    def test_bulleted_list_fallback(self):
+        text = "Plan:\n- Group by 'region' and sum 'revenue'\n* Sort the totals descending"
+        result = _parse_sub_tasks(text)
+        assert result == [
+            "Group by 'region' and sum 'revenue'",
+            "Sort the totals descending",
+        ]
+
+    def test_numbered_list_with_brackets_fallback(self):
+        text = "1. Select df[['product', 'revenue']]\n2) Sum 'revenue' by 'product'"
+        result = _parse_sub_tasks(text)
+        assert result == [
+            "Select df[['product', 'revenue']]",
+            "Sum 'revenue' by 'product'",
+        ]
 
     def test_empty_response(self):
         result = _parse_sub_tasks("")
@@ -86,7 +101,7 @@ class TestPlannerNode:
             "human_answer": "I meant monthly revenue trends",
         }
 
-        result = planner_node(state)
+        planner_node(state)
         # Verify the LLM was called with the clarification
         call_args = mock_llm.invoke.call_args[0][0]
         human_msg = call_args[-1].content
