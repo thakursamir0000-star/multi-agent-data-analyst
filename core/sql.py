@@ -23,27 +23,24 @@ Layered defenses:
    registry's DataFrames.
 4. A row cap and a timeout.
 
-Phase 2 requirement — remote SQL hardening (not implemented yet):
-This policy is sufficient for the local app, where the person querying
-also runs the server. A remote MCP server must additionally prevent
-information disclosure through environment/path introspection, which
-these checks still allow, e.g.:
+Remote policy (policy="remote", used by the MCP server over Streamable HTTP):
+the checks above suit the local app, where the person querying also runs
+the server. Remotely, environment/path introspection is refused as well:
   - current_setting(...) and duckdb_settings() — settings such as
     allowed_paths reveal the server's working directory; TimeZone etc.;
   - version(), pragma_version(), pragma_platform(), pragma_user_agent()
     — software versions and OS;
-  - other duckdb_*() / pragma_*() metadata functions.
-Prefer a default-deny allowlist of analytical functions for the remote
-policy over extending BLOCKED_FUNCTIONS. There is no policy object yet: the
-denylist check in validate_sql() and _ENGINE_CONFIG are the places a
-stricter, selectable policy would plug in.
+  - every duckdb_*() / pragma_*() function, the session user, and the
+    clock (now(), current_timestamp: their offset reveals the time zone).
+This is a prefix/name denylist; a default-deny allowlist of analytical
+functions would be stricter still and would plug into the same check.
 """
 
 from __future__ import annotations
 
 import re
 import threading
-from typing import Sequence
+from typing import Literal, Sequence
 
 import duckdb
 
@@ -74,6 +71,26 @@ BLOCKED_FUNCTIONS = frozenset({
     "checkpoint", "force_checkpoint",
 })
 
+# "remote" policy (the MCP server over Streamable HTTP): the person querying
+# doesn't run the server, so functions that describe the server itself are
+# refused too — settings (paths, TimeZone), versions, platform, catalogs, the
+# session user and the clock (its offset reveals the server's time zone).
+SqlPolicy = Literal["local", "remote"]
+REMOTE_BLOCKED_PREFIXES = ("duckdb_", "pragma_")
+REMOTE_BLOCKED_FUNCTIONS = frozenset({
+    "current_setting", "getvariable", "version", "current_database", "current_catalog",
+    "current_schema", "current_schemas", "current_query", "current_user", "current_role",
+    "session_user", "user", "txid_current", "now", "get_current_timestamp", "get_current_time",
+    "current_timestamp", "current_time", "current_date", "current_localtime",
+    "current_localtimestamp", "localtime", "localtimestamp", "transaction_timestamp",
+    "test_all_types", "test_vector_types",
+})
+# The same leaks without parentheses: SELECT current_user, current_timestamp
+REMOTE_BLOCKED_BARE_WORDS = frozenset({
+    "current_user", "current_role", "session_user", "user", "current_catalog", "current_schema",
+    "current_timestamp", "current_time", "current_date", "localtime", "localtimestamp",
+})
+
 _ENGINE_CONFIG = {
     "enable_external_access": False,
     "autoinstall_known_extensions": False,
@@ -91,8 +108,12 @@ _ENGINE_CONFIG = {
 _WORD_RE = re.compile(r'"(?:[^"]|"")*"|[A-Za-z_][A-Za-z0-9_$]*')
 
 
-def validate_sql(sql: str) -> str:
-    """Return the query if it is a single read-only SELECT; else raise QueryError."""
+def validate_sql(sql: str, policy: SqlPolicy = "local") -> str:
+    """Return the query if it is a single read-only SELECT; else raise QueryError.
+
+    ``policy="remote"`` additionally refuses server introspection (see
+    REMOTE_BLOCKED_FUNCTIONS).
+    """
     if not isinstance(sql, str) or not sql.strip():
         raise QueryError("The query is empty")
     if len(sql) > MAX_SQL_CHARS:
@@ -141,7 +162,29 @@ def validate_sql(sql: str) -> str:
             raise QueryError(
                 f"'{name}' is not allowed: queries may only read registered datasets"
             )
+    if policy == "remote":
+        _check_remote_policy(sql, tokens)
     return sql
+
+
+def _check_remote_policy(sql: str, tokens: list) -> None:
+    for i, (offset, token_type) in enumerate(tokens):
+        if token_type not in (duckdb.token_type.identifier, duckdb.token_type.keyword):
+            continue
+        match = _WORD_RE.match(sql, offset)
+        if not match:
+            continue
+        word = match.group(0)
+        quoted = word.startswith('"')
+        name = (word[1:-1].replace('""', '"') if quoted else word).lower()
+        called = i + 1 < len(tokens) and sql.startswith("(", tokens[i + 1][0])
+        if (called and (name in REMOTE_BLOCKED_FUNCTIONS or name.startswith(REMOTE_BLOCKED_PREFIXES))) or (
+            not quoted and name in REMOTE_BLOCKED_BARE_WORDS
+        ):
+            raise QueryError(
+                f"'{word}' is not allowed on a remote server: it describes the server, not the data"
+                + (f" (quote it, e.g. \"{name}\", if it is a column name)" if not called else "")
+            )
 
 
 def query_sql(
@@ -150,11 +193,13 @@ def query_sql(
     max_rows: int = 1000,
     timeout_s: float = 10.0,
     dataset_ids: Sequence[str] | None = None,
+    policy: SqlPolicy = "local",
 ) -> SqlResult:
     """Run one read-only SELECT against the registered datasets.
 
     Each dataset is available as a table named ``DatasetInfo.table_name``.
-    With ``dataset_ids``, only those datasets exist as tables.
+    With ``dataset_ids``, only those datasets exist as tables. Use
+    ``policy="remote"`` when the caller doesn't run the server.
     """
     if dataset_ids is not None and (
         isinstance(dataset_ids, str) or not all(isinstance(d, str) for d in dataset_ids)
@@ -164,7 +209,7 @@ def query_sql(
         raise QueryError(f"max_rows must be an integer between 1 and {MAX_RESULT_ROWS}")
     if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or not 0 < timeout_s <= MAX_TIMEOUT_SECONDS:
         raise QueryError(f"timeout_s must be between 0 and {MAX_TIMEOUT_SECONDS} seconds")
-    sql = validate_sql(sql)
+    sql = validate_sql(sql, policy)
 
     tables = registry._tables(dataset_ids)  # unknown IDs raise DatasetNotFoundError
     if not tables:

@@ -81,6 +81,8 @@ def register_tools(server: MCPServer, state: ServerState) -> None:
     """Register every tool the server's configuration allows."""
     config = state.config
     scopes = state.scopes
+    # Over HTTP the caller doesn't run the server, so SQL may not describe the server.
+    sql_policy = "remote" if config.transport == "streamable-http" else "local"
 
     # ── Session & datasets ──────────────────────────────────────────
 
@@ -233,7 +235,8 @@ def register_tools(server: MCPServer, state: ServerState) -> None:
         """
         with _tool_errors():
             registry = scopes.resolve(session).registry
-            return core_sql.query_sql(registry, sql, max_rows=max_rows, dataset_ids=dataset_ids)
+            return core_sql.query_sql(registry, sql, max_rows=max_rows, dataset_ids=dataset_ids,
+                                      policy=sql_policy)
 
     @server.tool(annotations=_READ_ONLY)
     def make_chart(

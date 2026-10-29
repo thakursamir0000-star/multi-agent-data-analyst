@@ -23,7 +23,6 @@ if _PROJECT_ROOT not in sys.path:
 import base64
 import uuid
 from io import BytesIO
-from typing import Any
 
 import streamlit as st
 from langgraph.types import Command
@@ -212,7 +211,6 @@ def _render_trace_sidebar() -> None:
             node = entry.get("node_name", "Unknown")
             latency = entry.get("latency_ms", 0)
             error = entry.get("error")
-            timestamp = entry.get("timestamp", "")
 
             # Node icon mapping
             icons = {
@@ -227,10 +225,8 @@ def _render_trace_sidebar() -> None:
             # Status badge
             if error:
                 badge = '<span class="badge badge-fail">ERROR</span>'
-                node_class = "trace-node trace-node-fail"
             else:
                 badge = '<span class="badge badge-pass">OK</span>'
-                node_class = "trace-node trace-node-pass"
 
             with st.expander(f"{icon} {node} — {latency:.0f}ms", expanded=False):
                 st.markdown(f"{badge}", unsafe_allow_html=True)

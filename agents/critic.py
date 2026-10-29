@@ -125,7 +125,7 @@ def _parse_critic_response(response_text: str) -> dict[str, Any]:
                 continue
             if in_block and stripped.startswith("{"):
                 text = "\n".join(
-                    l for l in lines[lines.index(line) :]
+                    ln for ln in lines[lines.index(line) :]
                 )
                 break
 
@@ -185,9 +185,9 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     if is_ambiguous or retry_count >= get_max_retries():
         # Escalate to human
         question = (
-            f"The analysis encountered issues that need your input:\n"
-            f"- " + "\n- ".join(issues) + "\n\n"
-            f"Could you clarify or refine your question?"
+            "The analysis encountered issues that need your input:\n"
+            "- " + "\n- ".join(issues) + "\n\n"
+            "Could you clarify or refine your question?"
         )
         return {
             "needs_human_input": True,

@@ -8,19 +8,33 @@ Security model:
    dunder / frame introspection, and system modules re-exported as
    attributes (e.g. matplotlib.os) — including aliased references.
 3. Custom import function whitelist blocks os, sys, subprocess, etc.
-4. Execution timeout prevents infinite loops.
-5. No access to real builtins beyond a curated safe set.
+4. No access to real builtins beyond a curated safe set.
+5. Process isolation (default): each snippet runs in a fresh child Python
+   process (tools/sandbox_worker.py) that is killed on timeout, gets memory
+   and CPU limits on Linux/macOS, starts in an empty temp directory, and
+   inherits no secrets (API keys are not in its environment). The child
+   works on its own copy of the data and reports back as JSON only, so a
+   compromised snippet can't touch the app's state or run code in the app.
+   SANDBOX_ISOLATION=thread runs in-process instead (faster, weaker; for
+   local development).
 """
 
 from __future__ import annotations
 
 import ast
 import base64
+import copy
 import io
+import json
+import os
+import pickle
+import subprocess
 import sys
+import tempfile
 import traceback
 import threading
 from contextlib import redirect_stdout, redirect_stderr
+from pathlib import Path
 from typing import Any
 
 
@@ -449,13 +463,41 @@ def run_code(
         - error: str | None — traceback string if execution failed
         - result: Any | None — the value of the last expression (if simple)
     """
-    # 1. AST security scan
+    # 1. AST security scan (in the parent, before anything runs)
     _scan_ast(code_str)
 
-    # 2. Build restricted namespace
-    namespace: dict[str, Any] = {
-        "__builtins__": _build_safe_builtins(),
-    }
+    if os.environ.get(ISOLATION_ENV, "process").strip().lower() == "thread":
+        return _run_in_thread(code_str, local_vars, timeout)
+    return _run_in_subprocess(code_str, local_vars, timeout)
+
+
+ISOLATION_ENV = "SANDBOX_ISOLATION"
+MAX_MEMORY_MB = int(os.environ.get("SANDBOX_MAX_MEMORY_MB", "2048"))
+STARTUP_GRACE_SECONDS = 15  # interpreter + pandas/matplotlib import in the child
+RESULT_MARKER = "\n<<<SANDBOX_RESULT>>>\n"
+_WORKER = Path(__file__).with_name("sandbox_worker.py")
+# Only what a Python process needs to start; API keys and other secrets stay behind.
+_ENV_ALLOWLIST = ("PATH", "SYSTEMROOT", "SystemRoot", "WINDIR", "TEMP", "TMP", "TMPDIR", "LANG", "LC_ALL")
+_RESULT_KEYS = ("stdout", "plot_base64", "error", "result")
+
+
+def _empty_result() -> dict[str, Any]:
+    return {"stdout": "", "plot_base64": None, "error": None, "result": None}
+
+
+def _timeout_result(timeout: int) -> dict[str, Any]:
+    return {**_empty_result(), "error": (
+        f"Execution timed out after {timeout} seconds. "
+        "Consider optimizing your code or reducing data size."
+    )}
+
+
+def execute_snippet(code_str: str, local_vars: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Run already-scanned code in a restricted namespace in *this* process.
+
+    Used by the child worker (process mode) and by thread mode.
+    """
+    namespace: dict[str, Any] = {"__builtins__": _build_safe_builtins()}
     if local_vars:
         namespace.update(local_vars)
 
@@ -477,44 +519,18 @@ def run_code(
     except ImportError:
         pass
 
-    # 3. Execute with timeout and output capture
     stdout_capture = io.StringIO()
     stderr_capture = io.StringIO()
-    result: dict[str, Any] = {
-        "stdout": "",
-        "plot_base64": None,
-        "error": None,
-        "result": None,
-    }
-    exec_error: list[str | None] = [None]
+    result = _empty_result()
+    try:
+        with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
+            exec(compile(code_str, "<sandbox>", "exec"), namespace)
+    except SecurityError as e:  # e.g. an import blocked at runtime
+        result["error"] = f"SecurityError: {e}"
+    except Exception:
+        result["error"] = traceback.format_exc()
 
-    def _execute():
-        try:
-            with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
-                exec(compile(code_str, "<sandbox>", "exec"), namespace)
-        except SecurityError:
-            raise
-        except Exception:
-            exec_error[0] = traceback.format_exc()
-
-    thread = threading.Thread(target=_execute, daemon=True)
-    thread.start()
-    thread.join(timeout=timeout)
-
-    if thread.is_alive():
-        result["error"] = (
-            f"Execution timed out after {timeout} seconds. "
-            "Consider optimizing your code or reducing data size."
-        )
-        return result
-
-    # 4. Collect results
     result["stdout"] = stdout_capture.getvalue()
-
-    if exec_error[0]:
-        result["error"] = exec_error[0]
-
-    # Capture any matplotlib figures
     plot_b64 = _capture_matplotlib_plot()
     if plot_b64:
         result["plot_base64"] = plot_b64
@@ -525,5 +541,68 @@ def run_code(
             result["result"] = str(namespace["result"])
         except Exception:
             pass
-
     return result
+
+
+def _run_in_thread(code_str: str, local_vars: dict[str, Any] | None, timeout: int) -> dict[str, Any]:
+    """In-process mode: a daemon thread. A timed-out snippet keeps running in the
+    background, and stdout capture is process-wide, so this is for development."""
+    # Copies, so a snippet's df.dropna(inplace=True) can't change the caller's data.
+    local_vars = {k: copy.deepcopy(v) for k, v in (local_vars or {}).items()}
+    box: list[dict[str, Any]] = []
+    thread = threading.Thread(target=lambda: box.append(execute_snippet(code_str, local_vars)), daemon=True)
+    thread.start()
+    thread.join(timeout=timeout)
+    if thread.is_alive() or not box:
+        return _timeout_result(timeout)
+    return box[0]
+
+
+def _child_env(workdir: str) -> dict[str, str]:
+    """The child's whole environment: allowlisted basics only, so no API keys."""
+    env = {k: os.environ[k] for k in _ENV_ALLOWLIST if k in os.environ}
+    env.update({
+        "MPLBACKEND": "Agg", "MPLCONFIGDIR": workdir, "PYTHONIOENCODING": "utf-8",
+        "OPENBLAS_NUM_THREADS": "1", "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
+    })
+    return env
+
+
+def _run_in_subprocess(code_str: str, local_vars: dict[str, Any] | None, timeout: int) -> dict[str, Any]:
+    """Process mode: one fresh, killable child per snippet."""
+    payload = pickle.dumps({
+        "code": code_str,
+        "local_vars": local_vars or {},
+        "timeout": timeout,
+        "max_memory_mb": MAX_MEMORY_MB,
+    })
+    with tempfile.TemporaryDirectory(prefix="sandbox_") as workdir:
+        try:
+            proc = subprocess.run(
+                [sys.executable, "-I", str(_WORKER)],
+                input=payload, capture_output=True, cwd=workdir, env=_child_env(workdir),
+                timeout=timeout + STARTUP_GRACE_SECONDS,
+            )
+        except subprocess.TimeoutExpired:  # subprocess.run has already killed the child
+            return _timeout_result(timeout)
+
+    stdout = proc.stdout.decode("utf-8", errors="replace")
+    if RESULT_MARKER in stdout:
+        try:
+            reported = json.loads(stdout.rsplit(RESULT_MARKER, 1)[1])
+        except json.JSONDecodeError:
+            reported = None
+        if isinstance(reported, dict):
+            result = _empty_result()
+            for key in _RESULT_KEYS:
+                value = reported.get(key)
+                if value is None or isinstance(value, str):
+                    result[key] = value if key != "stdout" else (value or "")
+            return result
+
+    detail = proc.stderr.decode("utf-8", errors="replace").strip()[-1500:]
+    if "MemoryError" in detail:
+        reason = f"ran out of memory (limit {MAX_MEMORY_MB} MB)"
+    else:
+        reason = f"exited with code {proc.returncode}"
+    return {**_empty_result(), "error": f"Sandbox process {reason}.\n{detail}".strip()}

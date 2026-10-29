@@ -88,7 +88,7 @@ def _parse_sub_tasks(response_text: str) -> list[str]:
                 continue
             if in_block and stripped.startswith("["):
                 text = "\n".join(
-                    l for l in lines[lines.index(line) :]
+                    ln for ln in lines[lines.index(line) :]
                 )
                 break
 
