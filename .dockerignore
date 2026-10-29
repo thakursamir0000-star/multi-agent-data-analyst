@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+venv
+.env
+.env.*
+.streamlit
+**/__pycache__
+.pytest_cache
+.ruff_cache
+logs
+evaluation/results
+tests
+*.docx

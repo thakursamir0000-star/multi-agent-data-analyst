@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: Groq model to benchmark (each model has its own daily quota)
+        description: Groq model to benchmark ("compare-all" runs all four; each model has its own daily quota)
         type: choice
         default: openai/gpt-oss-120b
         options:
@@ -16,6 +16,12 @@ on:
           - openai/gpt-oss-20b
           - llama-3.3-70b-versatile
           - llama-3.1-8b-instant
+          - compare-all
+      repeats:
+        description: Runs per question (more runs show how much answers vary, but cost more quota)
+        type: choice
+        default: "1"
+        options: ["1", "2", "3"]
   schedule:
     - cron: "0 3 * * 1"  # Mondays 03:00 UTC
 
@@ -35,8 +41,8 @@ jobs:
             python: "3.12"
             pins: ""
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
           cache: pip
@@ -49,6 +55,28 @@ jobs:
       - name: Benchmark ground truth (no LLM)
         run: python evaluation/benchmark.py --dry-run
 
+  docker:
+    name: docker (MCP server over HTTP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build image
+        run: docker build -t agentai-mcp .
+      - name: Start container
+        run: docker run -d --name mcp -p 8000:8000 agentai-mcp
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install the MCP client
+        run: pip install "mcp>=2.2,<3"
+      - name: Smoke-test the container with a real MCP client
+        run: python -m mcp_server.smoke http://127.0.0.1:8000/mcp
+      - name: Container health and logs
+        if: always()
+        run: |
+          docker inspect --format 'health: {{.State.Health.Status}}' mcp || true
+          docker logs mcp
+
   benchmark:
     needs: test
     if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
@@ -56,9 +84,10 @@ jobs:
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}  # optional; the steps are skipped without it
       MODEL: ${{ inputs.model || 'openai/gpt-oss-120b' }}
+      REPEATS: ${{ inputs.repeats || '1' }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
           cache: pip
@@ -67,7 +96,13 @@ jobs:
         run: pip install -r requirements.txt
       - name: End-to-end benchmark (Groq)
         if: ${{ env.GROQ_API_KEY != '' }}
-        run: python evaluation/benchmark.py --model "$MODEL"
+        run: |
+          if [ "$MODEL" = "compare-all" ]; then
+            MODELS="openai/gpt-oss-120b,openai/gpt-oss-20b,llama-3.3-70b-versatile,llama-3.1-8b-instant"
+          else
+            MODELS="$MODEL"
+          fi
+          python evaluation/benchmark.py --models "$MODELS" --repeats "$REPEATS"
       - uses: actions/upload-artifact@v4
         if: always()
         with:

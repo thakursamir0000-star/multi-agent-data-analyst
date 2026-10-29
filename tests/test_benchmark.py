@@ -19,7 +19,8 @@ from evaluation.benchmark import (
 
 def test_ground_truth_is_computed_for_every_question():
     cases = build_cases(pd.read_csv(DATA_FILE))
-    assert len(cases) == 15 and len({c["id"] for c in cases}) == 15
+    assert len(cases) == 22 and len({c["id"] for c in cases}) == 22
+    assert [c["level"] for c in cases].count("multi_step") == 7
     for case in cases:
         assert ("number" in case) != ("names" in case)
         if "number" in case:
@@ -158,6 +159,37 @@ def test_errors_are_excluded_from_quality_metrics():
     assert s["accuracy"] == 0.5  # 1 of the 2 scored, not 1 of 3
     table = benchmark.markdown(s, results, "m", "Groq's daily token limit was reached")
     assert "2 of 5 questions scored" in table and "⚠️ Groq's daily token limit" in table
+
+
+def test_levels_repeats_and_cost():
+    def r(i, repeat, correct, level="basic"):
+        return {**_result({"id": i, "question": f"q{i}"}, correct=correct), "repeat": repeat, "level": level,
+                "input_tokens": 1_000_000, "output_tokens": 100_000}
+
+    results = [r(1, 1, True), r(2, 1, False, "multi_step"),   # run 1: 50%
+               r(1, 2, True), r(2, 2, True, "multi_step")]     # run 2: 100%
+    s = summarize(results, price={"input": 0.15, "output": 0.75})
+    assert s["accuracy"] == 0.75 and s["accuracy_basic"] == 1.0 and s["accuracy_multi_step"] == 0.5
+    assert s["accuracy_std"] == 0.25          # runs at 0.5 and 1.0
+    assert s["consistent_share"] == 0.5       # q1 always right, q2 flipped
+    assert s["cost_per_question_usd"] == pytest.approx(0.225)    # 1M in * 0.15 + 0.1M out * 0.75
+    assert s["cost_per_correct_usd"] == pytest.approx(0.3)       # 0.9 total / 3 correct
+
+
+def test_pricing_file_covers_the_ci_models():
+    prices = benchmark.load_prices()
+    for model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+        assert prices[model]["input"] > 0 and prices[model]["output"] > 0
+
+
+def test_comparison_table_has_one_row_per_model():
+    s = summarize([_result(CASES[0])], price={"input": 0.1, "output": 0.5})
+    reports = [{"model": m, "summary": s, "results": [], "stop_reason": None} for m in ("a/big", "b/small")]
+    text = benchmark.report_markdown(reports)
+    assert text.count("| `a/big` |") == 1 and text.count("| `b/small` |") == 1
+    assert "Cost / correct answer" in text
+    single = benchmark.report_markdown(reports[:1])
+    assert "Cost / correct answer" not in single and "**Model:** `a/big`" in single
 
 
 def test_summary_metrics():
