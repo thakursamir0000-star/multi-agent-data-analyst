@@ -3,6 +3,21 @@ name: CI
 on:
   push:
   pull_request:
+  # The LLM benchmark spends Groq quota (a full run uses a large share of the
+  # free daily allowance), so it runs on demand and weekly, not on every push.
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Groq model to benchmark (each model has its own daily quota)
+        type: choice
+        default: openai/gpt-oss-120b
+        options:
+          - openai/gpt-oss-120b
+          - openai/gpt-oss-20b
+          - llama-3.3-70b-versatile
+          - llama-3.1-8b-instant
+  schedule:
+    - cron: "0 3 * * 1"  # Mondays 03:00 UTC
 
 jobs:
   test:
@@ -36,9 +51,11 @@ jobs:
 
   benchmark:
     needs: test
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'schedule' }}
     runs-on: ubuntu-latest
     env:
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}  # optional; the job is skipped without it
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}  # optional; the steps are skipped without it
+      MODEL: ${{ inputs.model || 'openai/gpt-oss-120b' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -50,7 +67,7 @@ jobs:
         run: pip install -r requirements.txt
       - name: End-to-end benchmark (Groq)
         if: ${{ env.GROQ_API_KEY != '' }}
-        run: python evaluation/benchmark.py
+        run: python evaluation/benchmark.py --model "$MODEL"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
