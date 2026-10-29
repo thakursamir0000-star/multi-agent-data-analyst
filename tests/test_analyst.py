@@ -4,7 +4,6 @@ Tests for agents/analyst.py — Analyst node.
 
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from agents.analyst import analyst_node
 

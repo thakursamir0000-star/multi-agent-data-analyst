@@ -25,6 +25,9 @@ env/
 # Logs
 logs/*.jsonl
 
+# Benchmark output
+evaluation/results/
+
 # OS
 .DS_Store
 Thumbs.db

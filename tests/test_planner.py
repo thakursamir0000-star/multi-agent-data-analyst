@@ -7,7 +7,6 @@ Uses mocked LLM to test parsing and state updates without API calls.
 import json
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 from agents.planner import _parse_sub_tasks, planner_node
 
@@ -102,7 +101,7 @@ class TestPlannerNode:
             "human_answer": "I meant monthly revenue trends",
         }
 
-        result = planner_node(state)
+        planner_node(state)
         # Verify the LLM was called with the clarification
         call_args = mock_llm.invoke.call_args[0][0]
         human_msg = call_args[-1].content

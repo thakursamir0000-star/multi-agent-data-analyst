@@ -1,8 +1,10 @@
 # 🤖 Multi-Agent Data Analyst
 
-**🔗 Live App:** [multi-agent-data-analyst.streamlit.app](https://multi-agent-data-analyst-qyzldehynt3vfjoyjumvev.streamlit.app/)
+**🔗 Live App:** [multi-agent-data-analyst.streamlit.app](https://multi-agent-data-analyst-qyzldehynt3vfjoyjumvev.streamlit.app/) · [![CI](https://github.com/thakursamir0000-star/multi-agent-data-analyst/actions/workflows/ci.yml/badge.svg)](https://github.com/thakursamir0000-star/multi-agent-data-analyst/actions/workflows/ci.yml)
 
-An autonomous, multi-agent data analysis system powered by **LangGraph**, **Groq**, and **Streamlit**. Upload any CSV/Excel dataset, ask questions in plain English, and watch specialized AI agents plan, code, analyze, and verify insights — all with full observability.
+An autonomous, multi-agent data analysis system powered by **LangGraph**, **Groq**, and **Streamlit**. Upload any CSV/Excel dataset, ask questions in plain English, and watch specialized AI agents plan, compute, analyze, and verify insights — all with full observability.
+
+The same tools are also available to any AI assistant through an **[MCP server](#mcp-server)** (Claude Desktop, IDEs, other agents): exact deterministic analysis, read-only SQL, charts, sandboxed pandas, and the whole multi-agent pipeline as one tool.
 
 ---
 
@@ -14,9 +16,14 @@ graph TD
     APP -->|invoke| GRAPH["LangGraph StateGraph"]
     
     GRAPH --> PLANNER["🧠 Planner<br/>Breaks query into sub-tasks"]
-    PLANNER --> CODER["💻 Coder<br/>Generates & executes pandas code"]
-    CODER --> SANDBOX["🔒 Sandbox<br/>Restricted execution environment"]
+    PLANNER --> CODER["💻 Coder<br/>Calls a core tool or writes pandas code"]
+    CODER --> CORE["📐 Core tools<br/>describe · group_aggregate · SQL · charts"]
+    CORE --> CODER
+    CODER --> SANDBOX["🔒 Sandbox<br/>Separate, killable process"]
     SANDBOX --> CODER
+    MCPC["🔌 MCP client"] -->|tools| MCP["MCP server"]
+    MCP --> CORE
+    MCP -->|analyze_question| GRAPH
     CODER --> ANALYST["📊 Analyst<br/>Synthesizes insights"]
     ANALYST --> CRITIC["🔍 Critic<br/>Fact-checks against data"]
     
@@ -59,8 +66,8 @@ user_query → Planner → sub_tasks → Coder (loop) → code_outputs
 
 ```bash
 # Clone the repository
-git clone <repo-url>
-cd Agentai
+git clone https://github.com/thakursamir0000-star/multi-agent-data-analyst.git
+cd multi-agent-data-analyst
 
 # Create virtual environment
 python -m venv venv
@@ -125,7 +132,7 @@ The Planner breaks this into: parse dates → group by month → calculate metri
 ## Project Structure
 
 ```
-Agentai/
+multi-agent-data-analyst/
 ├── agents/                    # LangGraph nodes
 │   ├── state.py               # Shared TypedDict state schema
 │   ├── planner.py             # Query → sub-tasks
@@ -142,12 +149,22 @@ Agentai/
 │   ├── tools.py               # run_tool: operations by name on a dataset ID
 │   ├── schemas.py             # Pydantic argument/result models
 │   └── errors.py              # CoreError hierarchy
+├── mcp_server/                # MCP server (python -m mcp_server)
+│   ├── server.py              # create_server + CLI (stdio / Streamable HTTP)
+│   ├── tools.py               # Tool adapters over core/, sandbox and graph
+│   ├── resources.py           # dataset://…/schema, trace://… resources
+│   ├── prompts.py             # Reusable analysis prompts
+│   └── context.py             # Config, per-client scopes, sessions
 ├── tools/                     # Utilities
 │   ├── data_tool.py           # CSV/Excel loader + profiler
-│   ├── sandbox.py             # Restricted code executor
+│   ├── sandbox.py             # Restricted code executor (AST scan + process isolation)
+│   ├── sandbox_worker.py      # Child process that runs one snippet
 │   └── observability.py       # Trace logger decorator
 ├── app/
 │   └── main.py                # Streamlit frontend
+├── evaluation/
+│   └── benchmark.py           # End-to-end benchmark with pandas ground truth
+├── .github/workflows/ci.yml   # Lint, tests, benchmark
 ├── tests/                     # Unit & integration tests
 ├── sample_data/               # Demo dataset + generator
 ├── logs/                      # JSONL trace logs (auto-generated)
@@ -160,13 +177,20 @@ Agentai/
 
 ## Security
 
-The sandbox executor enforces three security layers:
+Generated code passes through layered defenses:
 
-1. **AST Pre-Scan**: Parses code and blocks dangerous function calls (`open`, `exec`, `eval`, `compile`, `__import__`) before execution.
-2. **Import Whitelist**: Only allows `pandas`, `numpy`, `matplotlib`, `math`, `statistics`, `datetime`, `json`, `re`, `io`, `base64`, `collections`, `itertools`, `functools`.
-3. **Execution Timeout**: 30-second limit (configurable via `SANDBOX_TIMEOUT_SECONDS`).
+1. **AST pre-scan** (before anything runs): blocks dangerous calls (`open`, `exec`, `eval`, `compile`, `__import__`), dunder and frame introspection, and file/network access through allowed libraries (`pd.read_*`, `df.to_csv("path")`, `np.load`, `plt.savefig`, `pandas.io`, …), including aliased references.
+2. **Import whitelist**: only `pandas`, `numpy`, `matplotlib`, `math`, `statistics`, `datetime`, `json`, `re`, `io`, `base64`, `collections`, `itertools`, `functools`.
+3. **Restricted builtins**: a curated safe set only.
+4. **Process isolation**: each snippet runs in a fresh child Python process (`tools/sandbox_worker.py`):
+   - killed on timeout (`SANDBOX_TIMEOUT_SECONDS`, measured after start-up), so a runaway loop can't keep running inside the app;
+   - memory and CPU limits on Linux/macOS (`SANDBOX_MAX_MEMORY_MB`, default 2048);
+   - an empty temp working directory and **no secrets in its environment** (API keys aren't passed on);
+   - its own copy of the data, so `df.dropna(inplace=True)` can't change the session's dataset for later questions;
+   - results come back as JSON only, never pickle, so a compromised child can't run code in the app.
+5. **Deterministic core tools first**: common questions are answered by tested functions, not generated code (see below).
 
-> **Note**: While these layers provide defense-in-depth, this is NOT a production-grade sandbox. For production use, consider containerized execution (Docker) or a dedicated sandboxing service.
+`SANDBOX_ISOLATION=thread` runs snippets in-process instead (faster for local development, weaker isolation). For hostile multi-tenant use, run the app or MCP server itself in a container as well.
 
 ---
 
@@ -206,9 +230,51 @@ Arguments are validated by strict Pydantic models, where unknown keys and wrong 
 
 **Security boundaries.** The registry decides which data exists, and nothing in `core/` opens a path supplied by a caller. SQL can only read registered tables. The sandbox keeps its own AST scan, import whitelist and timeout for generated code.
 
-**Requirements for a future remote (MCP) server.** The current policies are sized for the local app, where the person querying also runs the server:
-- **Registry scope.** A registry is the unit of data visibility: every tool on it, including `query_sql` joins, can read everything registered in it. The Streamlit app keeps one registry per browser session. An MCP server must scope registries per client/session too, and must never share one global registry between unrelated clients.
-- **SQL introspection.** Remote SQL must also block information disclosure through `current_setting()`, `duckdb_settings()`, `version()`/`pragma_platform()` and similar environment/path introspection functions. These are harmless locally but reveal server paths and versions remotely. The preferred approach is an allowlist of analytical functions (see the notes in `core/sql.py`).
+**Registry scope.** A registry is the unit of data visibility: every tool on it, including `query_sql` joins, can read everything registered in it. The Streamlit app keeps one registry per browser session, and the MCP server keeps one per client session (below).
+
+---
+
+## MCP Server
+
+`mcp_server/` exposes the analyst to any [Model Context Protocol](https://modelcontextprotocol.io) client.
+
+```bash
+python -m mcp_server                             # stdio: the client starts one process per user
+python -m mcp_server --http --port 8000          # Streamable HTTP at http://127.0.0.1:8000/mcp
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "data-analyst": {
+      "command": "/path/to/multi-agent-data-analyst/venv/bin/python",
+      "args": ["-m", "mcp_server"],
+      "env": {
+        "PYTHONPATH": "/path/to/multi-agent-data-analyst",
+        "GROQ_API_KEY": "gsk_..."
+      }
+    }
+  }
+}
+```
+
+| Kind | Name | What it does |
+|---|---|---|
+| Tools | `open_session`, `register_dataset`, `list_datasets`, `get_dataset_schema`, `get_dataset_profile` | Sessions and data (upload CSV/Excel, or a file from the approved data folder) |
+| Tools | `describe`, `group_aggregate`, `correlate`, `detect_anomalies`, `query_sql`, `make_chart` | Exact, deterministic analysis; charts return a PNG plus the plotted values |
+| Tools | `run_pandas` | Sandboxed pandas when no tool fits (permission-gated) |
+| Tools | `analyze_question` | The whole multi-agent pipeline on one question (permission-gated; uses the server's Groq key) |
+| Resources | `dataset://{id}/schema`, `trace://{run_id}` | Column schema; the step-by-step trace of an `analyze_question` run |
+| Prompts | `analyze_dataset`, `data_quality_report` | Ready-made instructions for the client's model |
+
+**Isolation and permissions.**
+- **stdio:** one process serves exactly one client, so the process owns one local scope; `run_pandas` and `analyze_question` are on by default.
+- **Streamable HTTP:** MCP requests carry no client identity, so a client calls `open_session` and passes the returned unguessable token on every call; each token has its own datasets and traces, and unknown or idle sessions are refused. Code execution is **off** by default (`AGENTAI_MCP_ALLOW_RUN_PANDAS=true` / `AGENTAI_MCP_ALLOW_ANALYZE_QUESTION=true` to enable), server files aren't exposed unless `AGENTAI_DATA_DIR` is set, and uploads are capped.
+- **Remote SQL policy:** over HTTP, `query_sql` also refuses functions that describe the server instead of the data — `current_setting()`, `duckdb_settings()`, `version()`, every `duckdb_*()` / `pragma_*()` function, the session user and the clock (its offset reveals the server's time zone). Local use keeps the standard policy.
+
+The tests in `tests/test_mcp_server.py` drive every tool through the server exactly as a client's requests would, including session isolation between two HTTP clients.
 
 ---
 
@@ -225,7 +291,9 @@ Each log entry contains:
   "node_name": "Coder",
   "input_summary": "query=top 5 products, task_idx=0",
   "output_summary": "updated_keys=[code_outputs, current_task_index]",
-  "tokens_used": 0,
+  "tokens_used": 1834,
+  "input_tokens": 1512,
+  "output_tokens": 322,
   "latency_ms": 1234.56,
   "error": null
 }
@@ -233,17 +301,39 @@ Each log entry contains:
 
 ---
 
+## Evaluation
+
+`evaluation/benchmark.py` runs the full graph on 15 questions about `sample_data/sales_sample.csv` — totals, filters, rankings, a correlation, a month-level trend, a profit margin, missing values and a top-3 — whose answers are computed directly in pandas. An answer counts as correct when the final insight states the expected number (normal rounding, `%`, `K`/`M` allowed) or every expected name.
+
+| Metric | Meaning |
+|---|---|
+| Accuracy | Final insight contains the right answer |
+| Verified by critic / verified but wrong | How often the Critic passed the answer, and how often it passed a wrong one |
+| Clarification requests | Questions that ended in human-in-the-loop instead of an answer |
+| Mean retries | Critic → Coder retries per question |
+| Core-tool share | Steps answered by deterministic tools instead of generated pandas |
+| Latency p50 / p95, tokens / question | Cost of an answer |
+
+```bash
+python evaluation/benchmark.py --dry-run   # questions + ground truth, no LLM
+python evaluation/benchmark.py             # full run, needs GROQ_API_KEY
+```
+
+CI runs it on every push when the repository has a `GROQ_API_KEY` secret and posts the table in the run summary.
+
+**Results:** *added after the first CI run.*
+
+---
+
 ## Testing
 
 ```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Run specific test files
-python -m pytest tests/test_sandbox.py -v    # Security tests
-python -m pytest tests/test_data_tool.py -v  # Data loading tests
-python -m pytest tests/test_graph.py -v      # Integration tests
+pip install -r requirements-dev.txt
+ruff check .
+python -m pytest tests/
 ```
+
+The suite needs no API key (LLM calls are mocked). It covers the agents and graph routing, the core tools and SQL policies, the sandbox's static checks and its process isolation (timeouts, data copies, no secrets in the child, results that can't be spoofed), the MCP server end to end, and the benchmark's scoring. CI runs lint and tests with the sandbox in process-isolation mode.
 
 ---
 
@@ -255,8 +345,14 @@ python -m pytest tests/test_graph.py -v      # Integration tests
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model to use |
 | `MAX_RETRIES` | `2` | Max Critic → Coder retries |
 | `SANDBOX_TIMEOUT_SECONDS` | `30` | Code execution timeout |
+| `SANDBOX_ISOLATION` | `process` | `process` (separate, killable child) or `thread` (in-process, for development) |
+| `SANDBOX_MAX_MEMORY_MB` | `2048` | Memory limit for sandboxed code (Linux/macOS) |
 | `MAX_UPLOAD_MB` | `50` | Maximum file upload size |
 | `ENABLE_CORE_TOOLS` | `true` | Let the Coder use deterministic core tools (`false` = code only) |
+| `AGENTAI_DATA_DIR` | `sample_data/` on stdio, none on HTTP | Folder the MCP server may register files from |
+| `AGENTAI_MCP_ALLOW_RUN_PANDAS` | on (stdio) / off (HTTP) | Expose `run_pandas` over MCP |
+| `AGENTAI_MCP_ALLOW_ANALYZE_QUESTION` | on (stdio) / off (HTTP) | Expose `analyze_question` over MCP |
+| `AGENTAI_MCP_MAX_UPLOAD_MB` | `20` (stdio) / `5` (HTTP) | MCP upload limit |
 
 ---
 
