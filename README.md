@@ -186,7 +186,7 @@ Generated code passes through layered defenses:
    - killed on timeout (`SANDBOX_TIMEOUT_SECONDS`, measured after start-up), so a runaway loop can't keep running inside the app;
    - memory and CPU limits on Linux/macOS (`SANDBOX_MAX_MEMORY_MB`, default 2048);
    - an empty temp working directory and **no secrets in its environment** (API keys aren't passed on);
-   - its own copy of the data, so `df.dropna(inplace=True)` can't change the session's dataset for later questions;
+   - its own copy of the data, so a snippet that edits `df` (adds, drops or overwrites columns) can't change the session's dataset for later questions;
    - results come back as JSON only, never pickle, so a compromised child can't run code in the app.
 5. **Deterministic core tools first**: common questions are answered by tested functions, not generated code (see below).
 

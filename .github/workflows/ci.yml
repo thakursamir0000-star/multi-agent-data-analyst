@@ -6,9 +6,38 @@ on:
 
 jobs:
   test:
+    name: test (${{ matrix.label }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: "py3.11, pandas 2, duckdb 1"
+            python: "3.11"
+            pins: "pandas>=2.2,<3 duckdb>=1.1,<2"
+          - label: "py3.12, latest"
+            python: "3.12"
+            pins: ""
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+      - name: Install
+        run: pip install -r requirements-dev.txt ${{ matrix.pins }}
+      - name: Lint
+        run: ruff check .
+      - name: Test (sandbox in process-isolation mode)
+        run: pytest -q
+      - name: Benchmark ground truth (no LLM)
+        run: python evaluation/benchmark.py --dry-run
+
+  benchmark:
+    needs: test
     runs-on: ubuntu-latest
     env:
-      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}  # optional; enables the end-to-end benchmark
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}  # optional; the job is skipped without it
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -16,13 +45,8 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install
-        run: pip install -r requirements-dev.txt
-      - name: Lint
-        run: ruff check .
-      - name: Test (sandbox in process-isolation mode)
-        run: pytest -q
-      - name: Benchmark ground truth (no LLM)
-        run: python evaluation/benchmark.py --dry-run
+        if: ${{ env.GROQ_API_KEY != '' }}
+        run: pip install -r requirements.txt
       - name: End-to-end benchmark (Groq)
         if: ${{ env.GROQ_API_KEY != '' }}
         run: python evaluation/benchmark.py

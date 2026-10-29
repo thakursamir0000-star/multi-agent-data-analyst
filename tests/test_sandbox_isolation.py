@@ -19,9 +19,9 @@ def isolation(request, monkeypatch):
 
 def test_snippets_cannot_change_the_callers_data(isolation):
     df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
-    result = run_code("df.drop(columns=['a'], inplace=True)\nprint(list(df.columns))", {"df": df})
-    assert result["error"] is None and "['b']" in result["stdout"]
-    assert list(df.columns) == ["a", "b"]
+    result = run_code("df['a'] = 0\ndel df['b']\nprint(df.to_dict('list'))", {"df": df})
+    assert result["error"] is None and "{'a': [0, 0]}" in result["stdout"]
+    assert df.to_dict("list") == {"a": [1, 2], "b": [3, 4]}
 
 
 def test_runaway_code_is_stopped_on_time(monkeypatch):

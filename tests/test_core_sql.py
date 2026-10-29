@@ -178,7 +178,9 @@ class TestRejectedStatements:
             query_sql(registry, "SELECT 1; SELECT 2")
         with pytest.raises(QueryError, match="got DELETE"):
             query_sql(registry, "DELETE FROM sales")
-        with pytest.raises(QueryError, match="start with SELECT"):
+        # DuckDB 1.x parses PRAGMA into a SELECT (caught by the first-keyword
+        # check); DuckDB 2.x reports it as a PRAGMA statement. Refused either way.
+        with pytest.raises(QueryError, match="start with SELECT|got PRAGMA"):
             query_sql(registry, "PRAGMA version")
 
 

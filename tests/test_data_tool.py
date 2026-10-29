@@ -85,7 +85,7 @@ class TestProfile:
         profile = DataTool.profile(sample_df)
         assert "float" in profile["age"]["dtype"] or "int" in profile["age"]["dtype"]
         assert "float" in profile["salary"]["dtype"]
-        assert profile["name"]["dtype"] == "object"
+        assert profile["name"]["dtype"] in ("object", "str")  # pandas 3 infers "str" for text
 
     def test_profile_cardinality(self, sample_df):
         profile = DataTool.profile(sample_df)
