@@ -547,7 +547,7 @@ def execute_snippet(code_str: str, local_vars: dict[str, Any] | None = None) -> 
 def _run_in_thread(code_str: str, local_vars: dict[str, Any] | None, timeout: int) -> dict[str, Any]:
     """In-process mode: a daemon thread. A timed-out snippet keeps running in the
     background, and stdout capture is process-wide, so this is for development."""
-    # Copies, so a snippet's df.dropna(inplace=True) can't change the caller's data.
+    # Copies, so a snippet that edits df can't change the caller's data.
     local_vars = {k: copy.deepcopy(v) for k, v in (local_vars or {}).items()}
     box: list[dict[str, Any]] = []
     thread = threading.Thread(target=lambda: box.append(execute_snippet(code_str, local_vars)), daemon=True)
