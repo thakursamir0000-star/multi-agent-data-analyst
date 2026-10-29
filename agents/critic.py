@@ -14,35 +14,8 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from tools.config import get_env
-from tools.observability import log_node
-
-_MODEL = None
-_MAX_RETRIES = None
-
-
-def _get_model():
-    global _MODEL
-    if _MODEL is None:
-        _MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
-    return _MODEL
-
-
-def _get_max_retries():
-    global _MAX_RETRIES
-    if _MAX_RETRIES is None:
-        _MAX_RETRIES = int(get_env("MAX_RETRIES", "2"))
-    return _MAX_RETRIES
-
-
-def _strip_thinking(text: str) -> str:
-    """Remove <thinking>...</thinking> blocks (closed or unclosed) from LLM output."""
-    import re
-    text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
-    if "<thinking>" in text:
-        idx = text.find("<thinking>")
-        text = text[:idx].strip()
-    return text
+from agents.llm import count_tokens, get_max_retries, get_model, strip_thinking
+from tools.observability import TOKEN_USAGE_KEY, log_node
 
 CRITIC_SYSTEM_PROMPT = """\
 /no_think
@@ -91,8 +64,52 @@ def _format_verification_context(
     return "\n".join(parts)
 
 
+def _fail_result(issue: str) -> dict[str, Any]:
+    """A FAIL verdict for a Critic response that could not be trusted."""
+    return {
+        "verdict": "FAIL",
+        "issues": [issue],
+        "suggestion": "",
+        "is_ambiguous": False,
+    }
+
+
+def _normalize_critic_result(parsed: Any) -> dict[str, Any]:
+    """Validate a parsed Critic response. Fails closed: anything other than
+    an explicit "PASS" or "FAIL" verdict is treated as FAIL."""
+    if not isinstance(parsed, dict):
+        return _fail_result(
+            "Verification failed: the Critic's response was not a JSON object."
+        )
+
+    verdict = parsed.get("verdict")
+    if not isinstance(verdict, str) or verdict.strip().upper() not in ("PASS", "FAIL"):
+        return _fail_result(
+            f"Verification failed: the Critic returned a missing or invalid "
+            f"verdict ({verdict!r})."
+        )
+
+    issues = parsed.get("issues", [])
+    if isinstance(issues, str):
+        issues = [issues]
+    elif not isinstance(issues, list):
+        issues = []
+
+    suggestion = parsed.get("suggestion", "")
+    return {
+        "verdict": verdict.strip().upper(),
+        "issues": [str(issue) for issue in issues],
+        "suggestion": suggestion if isinstance(suggestion, str) else "",
+        "is_ambiguous": parsed.get("is_ambiguous") is True,
+    }
+
+
 def _parse_critic_response(response_text: str) -> dict[str, Any]:
-    """Parse the Critic's JSON response, with fallback handling."""
+    """Parse and validate the Critic's JSON response.
+
+    Fails closed: malformed or empty output, a missing verdict, or an
+    invalid verdict all return a FAIL result.
+    """
     text = response_text.strip()
 
     # Strip markdown fences
@@ -108,7 +125,7 @@ def _parse_critic_response(response_text: str) -> dict[str, Any]:
                 continue
             if in_block and stripped.startswith("{"):
                 text = "\n".join(
-                    l for l in lines[lines.index(line) :]
+                    ln for ln in lines[lines.index(line) :]
                 )
                 break
 
@@ -117,17 +134,14 @@ def _parse_critic_response(response_text: str) -> dict[str, Any]:
     end = text.rfind("}")
     if start != -1 and end != -1:
         try:
-            return json.loads(text[start : end + 1])
+            return _normalize_critic_result(json.loads(text[start : end + 1]))
         except json.JSONDecodeError:
             pass
 
-    # Fallback: assume PASS if we can't parse
-    return {
-        "verdict": "PASS",
-        "issues": ["Could not parse critic response — defaulting to PASS"],
-        "suggestion": "",
-        "is_ambiguous": False,
-    }
+    return _fail_result(
+        "Verification failed: the Critic's response could not be parsed, "
+        "so the answer was not verified."
+    )
 
 
 @log_node("Critic")
@@ -138,7 +152,7 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     Writes: verified_insight OR (critic_feedback + retry_count) OR
             (needs_human_input + human_question)
     """
-    llm = ChatGroq(model=_get_model(), temperature=0.1)
+    llm = ChatGroq(model=get_model(), temperature=0.1)
 
     draft_insight = state.get("draft_insight", "")
     code_outputs = state.get("code_outputs", [])
@@ -152,31 +166,34 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     ]
 
     response = llm.invoke(messages)
-    result = _parse_critic_response(_strip_thinking(response.content))
+    tokens = count_tokens(response)
+    result = _parse_critic_response(strip_thinking(response.content))
 
-    verdict = result.get("verdict", "PASS").upper()
-    issues = result.get("issues", [])
-    suggestion = result.get("suggestion", "")
-    is_ambiguous = result.get("is_ambiguous", False)
+    verdict = result["verdict"]  # always "PASS" or "FAIL" after parsing
+    issues = result["issues"]
+    suggestion = result["suggestion"]
+    is_ambiguous = result["is_ambiguous"]
 
     if verdict == "PASS":
         return {
             "verified_insight": draft_insight,
             "messages": [response],
+            TOKEN_USAGE_KEY: tokens,
         }
 
     # FAIL path
-    if is_ambiguous or retry_count >= _get_max_retries():
+    if is_ambiguous or retry_count >= get_max_retries():
         # Escalate to human
         question = (
-            f"The analysis encountered issues that need your input:\n"
-            f"- " + "\n- ".join(issues) + "\n\n"
-            f"Could you clarify or refine your question?"
+            "The analysis encountered issues that need your input:\n"
+            "- " + "\n- ".join(issues) + "\n\n"
+            "Could you clarify or refine your question?"
         )
         return {
             "needs_human_input": True,
             "human_question": question,
             "messages": [response],
+            TOKEN_USAGE_KEY: tokens,
         }
 
     # Retry: send feedback to Coder
@@ -185,4 +202,5 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
         "retry_count": retry_count + 1,
         "current_task_index": 0,  # Re-run from first task with feedback
         "messages": [response],
+        TOKEN_USAGE_KEY: tokens,
     }

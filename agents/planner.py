@@ -8,32 +8,14 @@ preventing the LLM from inventing columns or operations that don't apply.
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from tools.config import get_env
-from tools.observability import log_node
-
-_MODEL = None
-
-
-def _get_model():
-    global _MODEL
-    if _MODEL is None:
-        _MODEL = get_env("GROQ_MODEL", "openai/gpt-oss-120b")
-    return _MODEL
-
-
-def _strip_thinking(text: str) -> str:
-    """Remove <thinking>...</thinking> blocks (closed or unclosed) from LLM output."""
-    import re
-    text = re.sub(r"<thinking>.*?</thinking>", "", text, flags=re.DOTALL).strip()
-    if "<thinking>" in text:
-        idx = text.find("<thinking>")
-        text = text[:idx].strip()
-    return text
+from agents.llm import count_tokens, get_model, strip_thinking
+from tools.observability import TOKEN_USAGE_KEY, log_node
 
 PLANNER_SYSTEM_PROMPT = """\
 /no_think
@@ -71,10 +53,25 @@ def _build_planner_prompt(user_query: str, profile_text: str) -> str:
     )
 
 
+# Matches "1. task", "2) task", "- task", "* task", "• task"
+_LIST_ITEM_RE = re.compile(r"^\s*(?:\d+[.)]|[-*•])\s+(.+?)\s*$")
+
+
+def _parse_list_items(text: str) -> list[str]:
+    """Fallback: extract sub-tasks from a numbered or bulleted list."""
+    items = []
+    for line in text.splitlines():
+        match = _LIST_ITEM_RE.match(line)
+        if match:
+            items.append(match.group(1).strip())
+    return [t for t in items if len(t) > 5]
+
+
 def _parse_sub_tasks(response_text: str) -> list[str]:
     """Extract a JSON list of strings from the LLM response.
 
     Handles common issues: markdown code fences, leading text, etc.
+    Falls back to parsing a numbered/bulleted list if no JSON array is found.
     """
     text = response_text.strip()
 
@@ -91,7 +88,7 @@ def _parse_sub_tasks(response_text: str) -> list[str]:
                 continue
             if in_block and stripped.startswith("["):
                 text = "\n".join(
-                    l for l in lines[lines.index(line) :]
+                    ln for ln in lines[lines.index(line) :]
                 )
                 break
 
@@ -108,7 +105,7 @@ def _parse_sub_tasks(response_text: str) -> list[str]:
     except json.JSONDecodeError:
         pass
 
-    return []
+    return _parse_list_items(response_text)
 
 
 @log_node("Planner")
@@ -118,7 +115,7 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     Reads: user_query, dataframe_profile, human_answer (if re-planning)
     Writes: sub_tasks, current_task_index, messages
     """
-    llm = ChatGroq(model=_get_model(), temperature=0.2)
+    llm = ChatGroq(model=get_model(), temperature=0.2)
 
     user_query = state["user_query"]
     profile_text = state.get("dataframe_profile", "")
@@ -137,7 +134,7 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     ]
 
     response = llm.invoke(messages)
-    sub_tasks = _parse_sub_tasks(_strip_thinking(response.content))
+    sub_tasks = _parse_sub_tasks(strip_thinking(response.content))
 
     # Ensure at least one task
     if not sub_tasks:
@@ -150,4 +147,5 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
             HumanMessage(content=user_query),
             response,
         ],
+        TOKEN_USAGE_KEY: count_tokens(response),
     }

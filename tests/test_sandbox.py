@@ -169,6 +169,143 @@ class TestBlockedAttributes:
             run_code('getattr(None, "__import__")')
 
 
+# ── Security: File-System Escapes via Allowed Libraries ────────────
+
+_DF_VARS = {"df": pd.DataFrame({"a": [1, 2], "b": [3, 4]})}
+
+BLOCKED_ESCAPES = {
+    # pandas readers (direct, imported, aliased, pickle)
+    "pd.read_csv": "pd.read_csv('data.csv')",
+    "pd.read_pickle": "pd.read_pickle('data.pkl')",
+    "pd.read_excel": "pd.read_excel('data.xlsx')",
+    "from pandas import read_csv": "from pandas import read_csv",
+    "from pandas import *": "from pandas import *",
+    "alias pd.read_csv": "r = pd.read_csv",
+    # pandas writers that always target a file
+    "df.to_pickle": "df.to_pickle('out.pkl')",
+    "df.to_parquet": "df.to_parquet('out.parquet')",
+    "df.to_excel": "df.to_excel('out.xlsx')",
+    "pd.to_pickle": "pd.to_pickle(df, 'out.pkl')",
+    "pd.ExcelWriter": "w = pd.ExcelWriter('out.xlsx')",
+    "pd.HDFStore": "s = pd.HDFStore('out.h5')",
+    # path-optional serializers given a path / buffer / unknown args
+    "df.to_csv(path)": "df.to_csv('out.csv')",
+    "df.to_json(path)": "df.to_json('out.json')",
+    "df.to_string(path)": "df.to_string('out.txt')",
+    "df.to_csv(path_or_buf=)": "df.to_csv(path_or_buf='out.csv')",
+    "df.to_html(buf=)": "df.to_html(buf='out.html')",
+    "df.to_csv(**kwargs)": "kw = {}\ndf.to_csv(**kw)",
+    "df.to_csv(*args)": "args = ['out.csv']\ndf.to_csv(*args)",
+    "alias df.to_csv": "g = df.to_csv",
+    "unbound DataFrame.to_csv": "df.pipe(pd.DataFrame.to_csv, 'out.csv')",
+    # pandas string dispatch
+    "df.agg('to_csv')": "df.agg('to_csv', 0, 'out.csv')",
+    "df.apply('to_pickle')": "df.apply('to_pickle')",
+    # pandas.io
+    "import pandas.io.pickle": "import pandas.io.pickle",
+    "pd.io.common": "pd.io.common",
+    # NumPy
+    "np.load": "np.load('arr.npy', allow_pickle=True)",
+    "np.save": "np.save('arr.npy', [1, 2])",
+    "np.loadtxt": "np.loadtxt('data.txt')",
+    "np.genfromtxt": "np.genfromtxt('data.txt')",
+    "np.fromfile": "np.fromfile('data.bin')",
+    "np.memmap": "np.memmap('data.bin')",
+    "ndarray.tofile": "np.array([1]).tofile('out.bin')",
+    "ndarray.dump": "np.array([1]).dump('out.pkl')",
+    "from numpy import load": "from numpy import load",
+    "np.ctypeslib": "np.ctypeslib",
+    "import numpy.ctypeslib": "import numpy.ctypeslib",
+    "np.lib.npyio": "np.lib.npyio",
+    # io
+    "io.open": "import io\nio.open('data.txt')",
+    "alias io.open": "import io\nf = io.open",
+    "io.FileIO": "import io\nio.FileIO('data.txt')",
+    "from io import open": "from io import open",
+    # matplotlib
+    "plt.savefig": "plt.plot([1, 2])\nplt.savefig('out.png')",
+    "figure.savefig": "plt.gcf().savefig('out.png')",
+    "plt.imread": "plt.imread('img.png')",
+    "canvas.print_png": "plt.gcf().canvas.print_png('out.png')",
+    "import matplotlib.animation": "import matplotlib.animation",
+    "import matplotlib.cbook": "import matplotlib.cbook",
+    "from matplotlib import cbook": "from matplotlib import cbook",
+    # system modules re-exported as attributes
+    "matplotlib.os": "import matplotlib\nmatplotlib.os.getcwd()",
+    "plt.matplotlib.os": "plt.matplotlib.os",
+    "from matplotlib import os": "from matplotlib import os",
+    "statistics.random._os": "import statistics\nstatistics.random._os",
+    "json.codecs": "import json\njson.codecs",
+    "pd.core.generic.gc": "pd.core.generic.gc",
+    # dunder / frame introspection
+    "__globals__": "pd.DataFrame.head.__globals__",
+    "__traceback__": "try:\n    1 / 0\nexcept Exception as e:\n    t = e.__traceback__",
+    "gi_frame": "g = (x for x in [1])\nfr = g.gi_frame",
+    "f_back": "def f(fr):\n    return fr.f_back",
+    "tb_frame": "def f(tb):\n    return tb.tb_frame",
+    # dynamic execution via alias
+    "alias pd.eval": "e = pd.eval",
+}
+
+
+class TestBlockedFileSystemEscapes:
+    @pytest.mark.parametrize(
+        "code", BLOCKED_ESCAPES.values(), ids=BLOCKED_ESCAPES.keys()
+    )
+    def test_escape_blocked(self, code):
+        with pytest.raises(SecurityError, match="Blocked"):
+            run_code(code, local_vars=dict(_DF_VARS))
+
+    def test_blocked_write_creates_no_file(self, tmp_path):
+        target = tmp_path / "out.json"
+        with pytest.raises(SecurityError):
+            run_code(f"df.to_json({str(target)!r})", local_vars=dict(_DF_VARS))
+        assert not target.exists()
+
+    def test_error_message_suggests_column_access(self):
+        with pytest.raises(SecurityError, match=r"df\['<name>'\]"):
+            run_code("df.load.sum()", local_vars=dict(_DF_VARS))
+
+
+# ── Legitimate In-Memory Operations Still Work ─────────────────────
+
+ALLOWED_OPERATIONS = {
+    "df.to_string()": "print(df.to_string(index=False))",
+    "df.to_csv()": "print(df.to_csv(index=False))",
+    "df.to_csv(None)": "print(df.to_csv(None, index=False))",
+    "df.to_csv(path_or_buf=None)": "print(df.to_csv(path_or_buf=None))",
+    "df.to_json(orient=)": "print(df.to_json(orient='records'))",
+    "df.to_html()": "print(df.to_html())",
+    "df.to_dict()": "print(df.to_dict())",
+    "series.to_list()": "print(df['a'].to_list())",
+    "df.to_numpy()": "print(df.to_numpy())",
+    "pd.to_datetime": "print(pd.to_datetime('2024-01-15').year)",
+    "pd.to_numeric": "print(pd.to_numeric(pd.Series(['1', '2'])).sum())",
+    "io.StringIO": "import io\nbuf = io.StringIO('x,y\\n1,2')\nprint(buf.read())",
+    "func.__name__": "print(np.mean.__name__)",
+    "json.dumps/loads": "import json\nprint(json.loads(json.dumps({'k': 1})))",
+    "groupby.agg('sum')": "print(df.groupby('a')['b'].agg('sum'))",
+}
+
+
+class TestAllowedInMemoryOperations:
+    @pytest.mark.parametrize(
+        "code", ALLOWED_OPERATIONS.values(), ids=ALLOWED_OPERATIONS.keys()
+    )
+    def test_operation_allowed(self, code):
+        result = run_code(code, local_vars=dict(_DF_VARS))
+        assert result["error"] is None
+        assert result["stdout"]
+
+    def test_dataframe_plot_still_captured(self):
+        result = run_code(
+            "df.plot(kind='bar', x='a', y='b')\nplt.title('t')",
+            local_vars=dict(_DF_VARS),
+        )
+        assert result["error"] is None
+        assert result["plot_base64"] is not None
+
+
 # ── Security: Timeout ──────────────────────────────────────────────
 
 class TestTimeout:
