@@ -176,10 +176,20 @@ def test_levels_repeats_and_cost():
     assert s["cost_per_correct_usd"] == pytest.approx(0.3)       # 0.9 total / 3 correct
 
 
-def test_pricing_file_covers_the_ci_models():
+def test_pricing_file_covers_the_priced_ci_models():
     prices = benchmark.load_prices()
-    for model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant"):
+    for model in ("openai/gpt-oss-120b", "openai/gpt-oss-20b"):
         assert prices[model]["input"] > 0 and prices[model]["output"] > 0
+
+
+def test_a_model_without_a_list_price_shows_no_cost():
+    # qwen/qwen3.8-27b is benchmarked in CI but has no price in pricing.json.
+    priced = summarize([_result(CASES[0])], price={"input": 0.1, "output": 0.5})
+    unpriced = summarize([_result(CASES[0])], price=None)
+    reports = [{"model": m, "summary": s, "results": [], "stop_reason": None}
+               for m, s in (("openai/gpt-oss-20b", priced), ("qwen/qwen3.8-27b", unpriced))]
+    row = next(line for line in benchmark.report_markdown(reports).splitlines() if "`qwen/qwen3.8-27b`" in line)
+    assert row.count("| – |") >= 2  # cost per question and per correct answer
 
 
 def test_comparison_table_has_one_row_per_model():
