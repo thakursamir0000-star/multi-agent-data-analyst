@@ -8,14 +8,13 @@ on:
   workflow_dispatch:
     inputs:
       model:
-        description: Groq model to benchmark ("compare-all" runs all four; each model has its own daily quota)
+        description: Groq model to benchmark ("compare-all" runs all three; each model has its own daily quota)
         type: choice
         default: openai/gpt-oss-120b
         options:
           - openai/gpt-oss-120b
           - openai/gpt-oss-20b
-          - llama-3.3-70b-versatile
-          - llama-3.1-8b-instant
+          - qwen/qwen3.8-27b
           - compare-all
       repeats:
         description: Runs per question (more runs show how much answers vary, but cost more quota)
@@ -98,12 +97,12 @@ jobs:
         if: ${{ env.GROQ_API_KEY != '' }}
         run: |
           if [ "$MODEL" = "compare-all" ]; then
-            MODELS="openai/gpt-oss-120b,openai/gpt-oss-20b,llama-3.3-70b-versatile,llama-3.1-8b-instant"
+            MODELS="openai/gpt-oss-120b,openai/gpt-oss-20b,qwen/qwen3.8-27b"
           else
             MODELS="$MODEL"
           fi
           python evaluation/benchmark.py --models "$MODELS" --repeats "$REPEATS"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: benchmark-results
