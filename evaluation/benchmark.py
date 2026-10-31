@@ -37,6 +37,7 @@ import os
 import re
 import sys
 import time
+import unicodedata
 import uuid
 from pathlib import Path
 
@@ -151,10 +152,22 @@ def matches_number(text: str, expected: float, ratio: bool = False, absolute: bo
     return False
 
 
+# gpt-oss often writes no-break spaces ("Service Premium"), non-breaking
+# hyphens and zero-width characters, which plain substring matching misses.
+_INVISIBLE = dict.fromkeys(map(ord, "­​‌‍⁠﻿"))
+_HYPHENS = str.maketrans(dict.fromkeys("‐‑‒–—―−", "-"))
+
+
+def fold_typography(text: str) -> str:
+    """Plain-ASCII spacing and hyphens, lower case, so names can be compared."""
+    text = unicodedata.normalize("NFKC", text).translate(_INVISIBLE).translate(_HYPHENS)
+    return " ".join(text.split()).lower()
+
+
 def matches_names(text: str, names: list) -> bool:
     """Every expected name appears; a nested list means "any of these spellings"."""
-    lower = text.lower()
-    return all(any(str(alt).lower() in lower for alt in (n if isinstance(n, list) else [n])) for n in names)
+    folded = fold_typography(text)
+    return all(any(fold_typography(str(alt)) in folded for alt in (n if isinstance(n, list) else [n])) for n in names)
 
 
 def is_correct(case: dict, answer: str) -> bool:
