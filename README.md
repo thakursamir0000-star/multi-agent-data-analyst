@@ -344,7 +344,24 @@ python evaluation/benchmark.py --models openai/gpt-oss-120b,openai/gpt-oss-20b  
 
 A full run uses a large share of Groq's free daily token allowance for one model, so CI doesn't spend it on every push: start it from **Actions → CI → Run workflow** — pick a model or **compare-all**, and 1–3 runs per question — or let the weekly scheduled run do it; the tables appear in the run summary. Per-minute rate limits are waited out, a daily limit stops a model's run early with a note (the next model has its own quota), and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%. Costs use the list prices in `evaluation/pricing.json`; check them against [groq.com/pricing](https://groq.com/pricing) before quoting. `compare-all` runs `openai/gpt-oss-120b`, `openai/gpt-oss-20b` and `qwen/qwen3.8-27b` (Groq retired the Llama 3 models this list used to include); qwen has no price in the file, so its cost shows as –.
 
-**Results:** *added after the first CI run.*
+### Results
+
+Two CI runs with `openai/gpt-oss-120b`, one pass over the 22 questions each:
+
+| Run | Accuracy | Basic | Multi-step | Verified but wrong | Clarification requests | Latency p50 / p95 | Tokens / question | Cost / question |
+|---|---|---|---|---|---|---|---|---|
+| 2026-11-01 | **17 / 22** (0.77) | 14 / 15 | 3 / 7 | 4 | 1 | 29.5 s / 65.0 s | 7,404 | $0.0019 |
+| 2026-11-04 | **18 / 22** (0.82) | 14 / 15 | 4 / 7 | 3 | 1 | 29.6 s / 54.1 s | 8,293 | $0.0021 |
+
+The grader at the time scored these runs 14 / 22 and 16 / 22. It marked five answers wrong (#8, #12 and #15 in the first run, #8 and #12 in the second) although each one named the expected product or month: names were compared character by character, and gpt-oss writes typography such as no-break spaces. The matcher now ignores spacing, invisible characters and special hyphens (with tests), and the table counts those answers as correct.
+
+What the misses show:
+- **Basic questions are nearly solved.** The one miss in both runs, #11 *"What was the total revenue in 2024?"*, ended in a clarification request instead of an answer.
+- **Multi-step questions are the weak spot** (3 / 7 and 4 / 7). In #17, #21 and #22, in both runs, the answer was computed over the whole table instead of the filtered rows. #21 is the clearest case: the answer says the data was filtered to the West region, but its 1,461 units for Accessory S is that product's total across *all* regions; in the West, Gadget Z leads with 440. #19, the first half of 2024 versus the first half of 2025, was wrong in one run (the full year 2024 was used) and right in the other.
+- **The Critic approved those wrong answers** (3–4 per run). It checks that the code ran and the answer is clear, but not that the question's filter was applied, so this is the next thing to improve.
+- Answers cost about $0.002 each at Groq list prices and take about 30 s (p50), mostly several LLM calls between Planner, Coder and Critic.
+
+Pick **compare-all** in the workflow to add other models side by side.
 
 ---
 

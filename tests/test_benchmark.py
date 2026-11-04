@@ -59,6 +59,24 @@ def test_matches_names():
     assert matches_names("The best month was January 2025.", [["2025-01", "January 2025"]])
 
 
+@pytest.mark.parametrize("written", [
+    "Service Premium",       # no-break space
+    "Service Premium",       # narrow no-break space
+    "Service​ Premium",      # zero-width space
+    "“Service  Premium,”",  # curly quotes, double space
+    "SERVICE PREMIUM",
+])
+def test_matches_names_ignores_llm_typography(written):
+    # Benchmark run 2026-11-01 marked #8, #12 and #15 wrong although each named the right answer.
+    assert matches_names(f"The most profitable product is {written}.", ["Service Premium"])
+    assert matches_names(f"Top month: January 2025 ({written})", [["2025-01", "January 2025"]])
+
+
+def test_matches_names_folds_non_breaking_hyphens():
+    assert matches_names("Best seller: Gadget‑Z", ["Gadget-Z"])
+    assert not matches_names("Service Basic", ["Service Premium"])
+
+
 def test_is_correct_dispatches_on_case_type():
     assert is_correct({"number": 11}, "There are 11 distinct products.")
     assert is_correct({"names": ["North"]}, "The **North** region leads.")
