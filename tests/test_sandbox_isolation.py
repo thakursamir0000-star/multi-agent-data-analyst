@@ -73,3 +73,75 @@ def test_static_checks_still_run_before_any_process_starts(monkeypatch):
     monkeypatch.setattr(sandbox, "_WORKER", "/nonexistent/worker.py")  # would fail if reached
     with pytest.raises(sandbox.SecurityError):
         run_code("import os")
+
+
+# ── run-time guard (tools/sandbox_guard.py) ─────────────────────────
+# A review found that df.agg(<name built at run time>, 0, path) reached
+# DataFrame.to_csv and wrote a file outside the sandbox: the static scan only
+# saw string literals. These tests keep both layers honest.
+
+@pytest.mark.parametrize("built", [
+    '"to_" + "csv"',
+    '"".join(["to_", "csv"])',
+    'f"to_{\'csv\'}"',
+])
+def test_writer_names_built_from_literals_are_rejected_by_the_scan(built):
+    with pytest.raises(sandbox.SecurityError, match="to_csv"):
+        sandbox._scan_ast(f"df.agg({built}, 0, 'out.csv')")
+
+
+@pytest.mark.parametrize("build", [
+    'name = "".join(reversed(["csv", "to_"]))',
+    'name = "to-csv".replace("-", "_")',
+])
+def test_a_name_built_at_run_time_cannot_write_outside_the_sandbox(monkeypatch, tmp_path, build):
+    monkeypatch.setenv(sandbox.ISOLATION_ENV, "process")
+    target = tmp_path / "escaped.csv"
+    result = run_code(f"{build}\ndf.agg(name, 0, r'{target}')", {"df": pd.DataFrame({"a": [1]})})
+    assert not target.exists()
+    assert "outside the sandbox" in result["error"]
+
+
+GUARD_PROBE = r"""
+import os, socket, subprocess, sys, tempfile
+sys.path.insert(0, sys.argv[1])
+from tools.sandbox_guard import install_guard
+
+work, outside = tempfile.mkdtemp(), sys.argv[2]
+install_guard(work)
+
+def attempt(label, action):
+    try:
+        action()
+        print(label, "allowed")
+    except PermissionError:
+        print(label, "blocked")
+
+attempt("write-inside", lambda: open(os.path.join(work, "ok.txt"), "w").write("x"))
+attempt("read-inside", lambda: open(os.path.join(work, "ok.txt")).read())
+attempt("write-outside", lambda: open(os.path.join(outside, "new.txt"), "w").write("x"))
+attempt("read-outside", lambda: open(os.path.join(outside, "secret.txt")).read())
+attempt("delete-outside", lambda: os.remove(os.path.join(outside, "secret.txt")))
+attempt("network", lambda: socket.create_connection(("127.0.0.1", 9), timeout=1))
+attempt("start-program", lambda: subprocess.run([sys.executable, "-c", "pass"]))
+attempt("stdlib-import", lambda: __import__("fractions"))
+"""
+
+
+def test_guard_blocks_outside_files_network_and_programs(tmp_path):
+    # In its own process: an audit hook can't be removed and would stay in pytest's.
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    (tmp_path / "secret.txt").write_text("GROQ_API_KEY=not-a-real-key", encoding="utf-8")
+    project = str(Path(sandbox.__file__).resolve().parents[1])
+    probe = subprocess.run([sys.executable, "-I", "-c", GUARD_PROBE, project, str(tmp_path)],
+                           capture_output=True, text=True, timeout=60)
+    outcome = dict(line.split() for line in probe.stdout.splitlines() if line.strip())
+    assert outcome == {
+        "write-inside": "allowed", "read-inside": "allowed", "stdlib-import": "allowed",
+        "write-outside": "blocked", "read-outside": "blocked", "delete-outside": "blocked",
+        "network": "blocked", "start-program": "blocked",
+    }, probe.stderr
+    assert (tmp_path / "secret.txt").exists() and not (tmp_path / "new.txt").exists()

@@ -3,8 +3,10 @@ Child process for tools.sandbox.run_code (process isolation mode).
 
 Reads one pickled {code, local_vars, timeout, max_memory_mb} payload from
 stdin — written by the trusted parent after its AST security scan — applies
-resource limits, runs the snippet with the same restricted namespace as the
-in-process mode, prints the result as JSON after a marker line, and exits.
+resource limits, installs the run-time guard (tools/sandbox_guard.py: no file
+access outside its temp directory, no network, no new processes), runs the
+snippet with the same restricted namespace as the in-process mode, prints the
+result as JSON after a marker line, and exits.
 The parent only ever parses JSON from this process, never pickle.
 """
 
@@ -45,6 +47,17 @@ def main() -> None:
     # -I keeps the project off sys.path; add it back explicitly for tools.sandbox.
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
     from tools.sandbox import RESULT_MARKER, _timeout_result, execute_snippet
+    from tools.sandbox_guard import install_guard
+
+    # Load the scientific stack (and build matplotlib's font cache) before the
+    # guard goes on, so their start-up reads aren't mistaken for the snippet's.
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot  # noqa: F401
+    import numpy  # noqa: F401
+    import pandas  # noqa: F401
+    sys.dont_write_bytecode = True  # no .pyc writes into site-packages later
+    install_guard(os.getcwd())  # the parent starts us in the snippet's own temp directory
 
     def on_timeout() -> None:
         _emit(RESULT_MARKER, _timeout_result(timeout))
