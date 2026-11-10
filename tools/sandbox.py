@@ -17,6 +17,11 @@ Security model:
    compromised snippet can't touch the app's state or run code in the app.
    SANDBOX_ISOLATION=thread runs in-process instead (faster, weaker; for
    local development).
+6. Run-time guard (process mode): before the snippet runs, the child installs
+   an audit hook (tools/sandbox_guard.py) that blocks file writes, deletes and
+   reads outside its temp directory and the Python installation, network
+   access and starting programs. It catches what the static scan can't, such
+   as a method name built while the code runs (df.agg(name, 0, path)).
 """
 
 from __future__ import annotations
@@ -253,6 +258,27 @@ def _is_pathless_call(node: ast.Call) -> bool:
     return True
 
 
+def _folded_string(node: ast.AST) -> str | None:
+    """The text an expression builds from string literals alone, else None:
+    ``"to_" + "csv"``, ``f"to_{'csv'}"`` and ``"".join(["to_", "csv"])`` all give
+    ``"to_csv"``. Anything computed at run time is left to the run-time guard."""
+    if isinstance(node, ast.Constant):
+        return node.value if isinstance(node.value, str) else None
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left, right = _folded_string(node.left), _folded_string(node.right)
+        return left + right if left is not None and right is not None else None
+    if isinstance(node, ast.JoinedStr):
+        parts = [_folded_string(v.value if isinstance(v, ast.FormattedValue) else v) for v in node.values]
+        return "".join(parts) if all(p is not None for p in parts) else None
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "join"
+            and len(node.args) == 1 and isinstance(node.args[0], (ast.List, ast.Tuple))):
+        separator = _folded_string(node.func.value)
+        items = [_folded_string(e) for e in node.args[0].elts]
+        if separator is not None and all(i is not None for i in items):
+            return separator.join(items)
+    return None
+
+
 class _ASTSecurityVisitor(ast.NodeVisitor):
     """Walks the AST and raises SecurityError for forbidden patterns."""
 
@@ -282,7 +308,24 @@ class _ASTSecurityVisitor(ast.NodeVisitor):
                 )
         self.generic_visit(node)
 
+    def _check_built_string(self, node: ast.AST) -> None:
+        text = _folded_string(node)
+        if text is not None and (text in BLOCKED_PANDAS_WRITERS or text in PATH_OPTIONAL_WRITERS):
+            raise SecurityError(
+                f"Blocked method name built from strings: '{text}' at line {node.lineno}. "
+                f"Calling file I/O methods by name is not allowed."
+            )
+
+    def visit_BinOp(self, node: ast.BinOp) -> None:
+        self._check_built_string(node)
+        self.generic_visit(node)
+
+    def visit_JoinedStr(self, node: ast.JoinedStr) -> None:
+        self._check_built_string(node)
+        self.generic_visit(node)
+
     def visit_Call(self, node: ast.Call) -> None:
+        self._check_built_string(node)  # "".join(["to_", "csv"])
         # Direct function calls: open(...), exec(...), etc.
         if isinstance(node.func, ast.Name):
             if node.func.id in BLOCKED_FUNCTION_NAMES:

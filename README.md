@@ -160,6 +160,7 @@ multi-agent-data-analyst/
 │   ├── data_tool.py           # CSV/Excel loader + profiler
 │   ├── sandbox.py             # Restricted code executor (AST scan + process isolation)
 │   ├── sandbox_worker.py      # Child process that runs one snippet
+│   ├── sandbox_guard.py       # Run-time audit hook: no outside files, network or programs
 │   └── observability.py       # Trace logger decorator
 ├── app/
 │   └── main.py                # Streamlit frontend
@@ -182,7 +183,7 @@ multi-agent-data-analyst/
 
 Generated code passes through layered defenses:
 
-1. **AST pre-scan** (before anything runs): blocks dangerous calls (`open`, `exec`, `eval`, `compile`, `__import__`), dunder and frame introspection, and file/network access through allowed libraries (`pd.read_*`, `df.to_csv("path")`, `np.load`, `plt.savefig`, `pandas.io`, …), including aliased references.
+1. **AST pre-scan** (before anything runs): blocks dangerous calls (`open`, `exec`, `eval`, `compile`, `__import__`), dunder and frame introspection, and file/network access through allowed libraries (`pd.read_*`, `df.to_csv("path")`, `np.load`, `plt.savefig`, `pandas.io`, …), including aliased references and method names glued together from string pieces (`"to_" + "csv"`).
 2. **Import whitelist**: only `pandas`, `numpy`, `matplotlib`, `math`, `statistics`, `datetime`, `json`, `re`, `io`, `base64`, `collections`, `itertools`, `functools`.
 3. **Restricted builtins**: a curated safe set only.
 4. **Process isolation**: each snippet runs in a fresh child Python process (`tools/sandbox_worker.py`):
@@ -191,9 +192,10 @@ Generated code passes through layered defenses:
    - an empty temp working directory and **no secrets in its environment** (API keys aren't passed on);
    - its own copy of the data, so a snippet that edits `df` (adds, drops or overwrites columns) can't change the session's dataset for later questions;
    - results come back as JSON only, never pickle, so a compromised child can't run code in the app.
-5. **Deterministic core tools first**: common questions are answered by tested functions, not generated code (see below).
+5. **Run-time guard** (`tools/sandbox_guard.py`): just before the snippet runs, the child installs a Python audit hook, which can't be removed afterwards. It blocks writing, deleting or renaming files outside the snippet's temp folder, reading files outside that folder and the Python installation (so not the project's `.env`), network connections and starting other programs. This catches what a static scan can't: a review showed that `df.agg(name, 0, path)` with `name` built at run time reached `DataFrame.to_csv` and wrote a file outside the sandbox. Tests reproduce that and similar attempts.
+6. **Deterministic core tools first**: common questions are answered by tested functions, not generated code (see below).
 
-`SANDBOX_ISOLATION=thread` runs snippets in-process instead (faster for local development, weaker isolation). For hostile multi-tenant use, run the app or MCP server itself in a container as well.
+`SANDBOX_ISOLATION=thread` runs snippets in-process instead, without the process boundary or the run-time guard (faster for local development only). The guard is strong protection for a single-user data app, but an audit hook is not an operating-system boundary: for hostile multi-tenant use, also run the sandbox worker in a container with a read-only file system, no network and resource limits.
 
 ---
 
