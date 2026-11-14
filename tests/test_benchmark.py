@@ -170,6 +170,27 @@ def test_minute_limit_is_waited_out_once():
     assert all(r["error"] is None for r in results)
 
 
+def test_a_busy_minute_is_retried_after_a_full_minute():
+    attempts, waits = {}, []
+
+    def runner(case):
+        attempts[case["id"]] = attempts.get(case["id"], 0) + 1
+        busy = case["id"] == 2 and attempts[2] <= 2  # limited twice, then fine
+        return _result(case, error=MINUTE if busy else None)
+
+    results, reason = benchmark.run_all(CASES, runner, sleep=waits.append)
+    assert attempts[2] == 3 and waits == [pytest.approx(8.5), 60.0]
+    assert reason is None and all(r["error"] is None for r in results)
+
+
+def test_a_question_still_limited_after_three_retries_is_an_error():
+    waits = []
+    results, reason = benchmark.run_all(
+        CASES, lambda case: _result(case, error=MINUTE if case["id"] == 2 else None), sleep=waits.append)
+    assert waits == [pytest.approx(8.5), 60.0, 60.0]
+    assert results[1]["error"] and reason is None and len(results) == len(CASES)
+
+
 def test_errors_are_excluded_from_quality_metrics():
     results = [_result(CASES[0]), _result(CASES[1], correct=False), _result(CASES[2], error=DAILY)]
     s = summarize(results, planned=5)

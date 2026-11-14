@@ -344,7 +344,7 @@ python evaluation/benchmark.py --level multi_step --repeats 3             # hard
 python evaluation/benchmark.py --models openai/gpt-oss-120b,openai/gpt-oss-20b   # side-by-side comparison
 ```
 
-A full run uses a large share of Groq's free daily token allowance for one model, so CI doesn't spend it on every push: start it from **Actions → CI → Run workflow** — pick a model or **compare-all**, and 1–3 runs per question — or let the weekly scheduled run do it; the tables appear in the run summary. Per-minute rate limits are waited out, a daily limit stops a model's run early with a note (the next model has its own quota), and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%. Costs use the list prices in `evaluation/pricing.json`; check them against [groq.com/pricing](https://groq.com/pricing) before quoting. `compare-all` runs `openai/gpt-oss-120b`, `openai/gpt-oss-20b` and `qwen/qwen3.8-27b` (Groq retired the Llama 3 models this list used to include); qwen has no price in the file, so its cost shows as –.
+A full run uses a large share of Groq's free daily token allowance for one model, so CI doesn't spend it on every push: start it from **Actions → CI → Run workflow** — pick a model or **compare-all**, and 1–3 runs per question — or let the weekly scheduled run do it; the tables appear in the run summary. Per-minute rate limits are retried: each Groq call retries up to `GROQ_API_RETRIES` times (default 6) after Groq's suggested wait, and a question that still fails is retried up to three more times, the later ones after a full minute, because one question can use more tokens than the free tier's 8,000 per minute. Run one evaluation at a time on a shared key. A daily limit stops a model's run early with a note (the next model has its own quota), and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%. Costs use the list prices in `evaluation/pricing.json`; check them against [groq.com/pricing](https://groq.com/pricing) before quoting. `compare-all` runs `openai/gpt-oss-120b`, `openai/gpt-oss-20b` and `qwen/qwen3.8-27b` (Groq retired the Llama 3 models this list used to include); qwen has no price in the file, so its cost shows as –.
 
 ### Results
 
@@ -386,6 +386,7 @@ The suite needs no API key (LLM calls are mocked). It covers the agents and grap
 | `GROQ_API_KEY` | (required) | Your Groq API key |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model to use |
 | `MAX_RETRIES` | `2` | Max Critic → Coder retries |
+| `GROQ_API_RETRIES` | `6` | Retries of one Groq call after a rate limit (the client waits Groq's suggested time) |
 | `SANDBOX_TIMEOUT_SECONDS` | `30` | Code execution timeout |
 | `SANDBOX_ISOLATION` | `process` | `process` (separate, killable child) or `thread` (in-process, for development) |
 | `SANDBOX_MAX_MEMORY_MB` | `2048` | Memory limit for sandboxed code (Linux/macOS) |

@@ -123,3 +123,12 @@ class TestPlannerNode:
 
         result = planner_node(state)
         assert len(result["sub_tasks"]) >= 1  # Fallback task
+
+
+@patch("agents.planner.ChatGroq")
+def test_planner_client_retries_rate_limits(mock_groq_cls):
+    from agents.llm import get_api_retries
+
+    mock_groq_cls.return_value.invoke.return_value = MagicMock(content=json.dumps(["Sum 'revenue'"]))
+    planner_node({"user_query": "Total revenue?", "dataframe_profile": "revenue (float64)", "human_answer": ""})
+    assert mock_groq_cls.call_args.kwargs["max_retries"] == get_api_retries()

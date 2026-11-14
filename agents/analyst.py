@@ -12,7 +12,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from agents.llm import count_tokens, get_model, strip_thinking
+from agents.llm import count_tokens, get_api_retries, get_model, strip_thinking
 from tools.observability import TOKEN_USAGE_KEY, log_node
 
 ANALYST_SYSTEM_PROMPT = """\
@@ -71,7 +71,7 @@ def analyst_node(state: dict[str, Any]) -> dict[str, Any]:
     Reads: user_query, code_outputs
     Writes: draft_insight, messages
     """
-    llm = ChatGroq(model=get_model(), temperature=0.3)
+    llm = ChatGroq(model=get_model(), temperature=0.3, max_retries=get_api_retries())
 
     user_query = state.get("user_query", "")
     code_outputs = state.get("code_outputs", [])

@@ -19,6 +19,7 @@ DEFAULT_MODEL = "openai/gpt-oss-120b"
 
 _MODEL: str | None = None
 _MAX_RETRIES: int | None = None
+_API_RETRIES: int | None = None
 _CORE_TOOLS: bool | None = None
 
 # A closed <think>...</think> or <thinking>...</thinking> block
@@ -41,6 +42,19 @@ def get_max_retries() -> int:
     if _MAX_RETRIES is None:
         _MAX_RETRIES = int(get_env("MAX_RETRIES", "2"))
     return _MAX_RETRIES
+
+
+def get_api_retries() -> int:
+    """Retries for one Groq call (GROQ_API_RETRIES, default 6), read once on first use.
+
+    The Groq client waits the time Groq suggests before each retry. Its default
+    of 2 wasn't enough on the free tier: one question uses ~8-11k tokens and the
+    limit is 8k tokens per minute, so a busy minute failed whole questions.
+    """
+    global _API_RETRIES
+    if _API_RETRIES is None:
+        _API_RETRIES = int(get_env("GROQ_API_RETRIES", "6"))
+    return _API_RETRIES
 
 
 def core_tools_enabled() -> bool:

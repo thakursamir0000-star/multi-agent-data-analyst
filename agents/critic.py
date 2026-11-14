@@ -14,7 +14,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from agents.llm import count_tokens, get_max_retries, get_model, strip_thinking
+from agents.llm import count_tokens, get_api_retries, get_max_retries, get_model, strip_thinking
 from tools.observability import TOKEN_USAGE_KEY, log_node
 
 CRITIC_SYSTEM_PROMPT = """\
@@ -152,7 +152,7 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     Writes: verified_insight OR (critic_feedback + retry_count) OR
             (needs_human_input + human_question)
     """
-    llm = ChatGroq(model=get_model(), temperature=0.1)
+    llm = ChatGroq(model=get_model(), temperature=0.1, max_retries=get_api_retries())
 
     draft_insight = state.get("draft_insight", "")
     code_outputs = state.get("code_outputs", [])

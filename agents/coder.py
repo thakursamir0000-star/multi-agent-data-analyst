@@ -21,7 +21,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from agents.llm import core_tools_enabled, count_tokens, get_model, strip_thinking
+from agents.llm import core_tools_enabled, count_tokens, get_api_retries, get_model, strip_thinking
 from agents.state import NewAttempt
 from core.datasets import DatasetRegistry
 from core.errors import CoreError
@@ -247,7 +247,7 @@ def coder_node(
         When both are given (and ENABLE_CORE_TOOLS is not false), the LLM
         may answer with a deterministic core tool call instead of code.
     """
-    llm = ChatGroq(model=get_model(), temperature=0.1)
+    llm = ChatGroq(model=get_model(), temperature=0.1, max_retries=get_api_retries())
 
     sub_tasks = state.get("sub_tasks", [])
     task_idx = state.get("current_task_index", 0)

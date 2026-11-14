@@ -7,7 +7,7 @@ Every node reads from and writes to this state object.
 
 from __future__ import annotations
 
-from typing import TypedDict, Annotated
+from typing import Annotated, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages

@@ -14,7 +14,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from agents.llm import count_tokens, get_model, strip_thinking
+from agents.llm import count_tokens, get_api_retries, get_model, strip_thinking
 from tools.observability import TOKEN_USAGE_KEY, log_node
 
 PLANNER_SYSTEM_PROMPT = """\
@@ -115,7 +115,7 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     Reads: user_query, dataframe_profile, human_answer (if re-planning)
     Writes: sub_tasks, current_task_index, messages
     """
-    llm = ChatGroq(model=get_model(), temperature=0.2)
+    llm = ChatGroq(model=get_model(), temperature=0.2, max_retries=get_api_retries())
 
     user_query = state["user_query"]
     profile_text = state.get("dataframe_profile", "")

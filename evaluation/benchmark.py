@@ -229,17 +229,23 @@ def retry_after_seconds(error: str, default: float = 30.0) -> float:
     return int(match.group(1) or 0) * 60 + float(match.group(2)) if match else default
 
 
-def run_all(cases: list[dict], runner, sleep=time.sleep, max_wait: float = 120.0) -> tuple[list[dict], str | None]:
-    """Run every case; wait out per-minute limits once, stop at a daily limit.
+def run_all(cases: list[dict], runner, sleep=time.sleep, max_wait: float = 120.0,
+            minute_retries: int = 3) -> tuple[list[dict], str | None]:
+    """Run every case; retry per-minute limits, stop at a daily limit.
 
-    Returns (results, stop_reason). After a daily limit the remaining
+    A question that hits the per-minute limit is retried up to `minute_retries`
+    times: first after Groq's suggested wait, then after a full minute so the
+    window clears (one question can use more tokens than a free-tier minute
+    allows). Returns (results, stop_reason). After a daily limit the remaining
     questions can't succeed until the quota resets, so they aren't attempted.
     """
     results = []
     for case in cases:
         result = runner(case)
-        if rate_limit_kind(result["error"]) == "minute":
-            wait = min(retry_after_seconds(result["error"]) + 2, max_wait)
+        for attempt in range(minute_retries):
+            if rate_limit_kind(result["error"]) != "minute":
+                break
+            wait = min(retry_after_seconds(result["error"]) + 2, max_wait) if attempt == 0 else 60.0
             print(f"   per-minute rate limit; waiting {wait:.0f}s and retrying #{case['id']}")
             sleep(wait)
             result = runner(case)
