@@ -218,5 +218,13 @@ def test_gate_skips_suites_and_models_without_a_baseline():
     assert failures == [] and len(notes) == 2 and all("no baseline yet" in n for n in notes)
 
 
+def test_api_errors_print_as_errors_not_misses(capsys):
+    daily = "RateLimitError: 429 ... tokens per day (TPD): Limit 200000"
+    case = {"id": 106, "question": "q"}
+    benchmark.run_all([case], lambda c: {**_scored(106, False), "error": daily}, sleep=lambda s: None)
+    out = capsys.readouterr().out
+    assert "#106 ERR" in out and "tokens per day" in out and "MISS" not in out
+
+
 def test_history_entry_is_json_serializable():
     json.dumps(history_entry(_report(20), commit=benchmark.current_commit()))

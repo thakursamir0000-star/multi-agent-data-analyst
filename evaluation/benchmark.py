@@ -425,9 +425,11 @@ def run_all(cases: list[dict], runner, sleep=time.sleep, max_wait: float = 120.0
             result = runner(case)
         result["repeat"] = case.get("repeat", 1)
         run_label = f" (run {result['repeat']})" if result["repeat"] > 1 else ""
+        status = "OK  " if result["correct"] else ("ERR " if result["error"] else "MISS")
         why = f" ({result['failure']})" if result.get("failure") else ""
-        print(f"#{result['id']:>2}{run_label} {'OK  ' if result['correct'] else 'MISS'} "
-              f"{result['latency_s']:>5.1f}s  {case['question']}{why}")
+        print(f"#{result['id']:>2}{run_label} {status} {result['latency_s']:>5.1f}s  {case['question']}{why}")
+        if result["error"]:
+            print(f"     {result['error'][:200]}")
         results.append(result)
         if rate_limit_kind(result["error"]) == "daily":
             skipped = len(cases) - len(results)
@@ -720,6 +722,10 @@ def main() -> None:
     parser.add_argument("--history", action="store_true", help="print the trend table of recorded runs and exit")
     parser.add_argument("--dry-run", action="store_true", help="print questions and ground truth only")
     args = parser.parse_args()
+    try:  # Windows consoles default to a code page without "–", "≥" or "⚠"
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    except (AttributeError, ValueError):
+        pass
 
     if args.history:
         print(history_table(load_history()))
@@ -775,11 +781,12 @@ def main() -> None:
     if args.gate:
         text += "\n\n**Regression gate:** " + ("failed" if failures else "passed") + "\n" + "".join(
             f"\n- {line}" for line in failures + notes)
-    print("\n" + text)
+    # Save first: the measured answers must survive any problem with printing.
     RESULTS_DIR.mkdir(exist_ok=True)
     (RESULTS_DIR / "benchmark.json").write_text(json.dumps(reports, indent=2, default=str), encoding="utf-8")
     if not args.no_history:
         append_history(entries)
+    print("\n" + text)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
             f.write("## Multi-agent benchmark\n\n" + text + "\n")
