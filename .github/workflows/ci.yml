@@ -16,11 +16,20 @@ on:
           - openai/gpt-oss-20b
           - qwen/qwen3.8-27b
           - compare-all
+      suite:
+        description: Question set ("sales" is the development set, "support" the held-out set; one suite uses most of a model's free daily quota)
+        type: choice
+        default: sales
+        options: [sales, support]
       repeats:
         description: Runs per question (more runs show how much answers vary, but cost more quota)
         type: choice
         default: "1"
         options: ["1", "2", "3"]
+      label:
+        description: Note stored with the run in the history (e.g. before / after)
+        type: string
+        default: ""
   schedule:
     - cron: "0 3 * * 1"  # Mondays 03:00 UTC
 
@@ -52,7 +61,7 @@ jobs:
       - name: Test (sandbox in process-isolation mode)
         run: pytest -q
       - name: Benchmark ground truth (no LLM)
-        run: python evaluation/benchmark.py --dry-run
+        run: python evaluation/benchmark.py --dry-run --suite all
 
   docker:
     name: docker (MCP server over HTTP)
@@ -83,7 +92,9 @@ jobs:
     env:
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}  # optional; the steps are skipped without it
       MODEL: ${{ inputs.model || 'openai/gpt-oss-120b' }}
+      SUITE: ${{ inputs.suite || 'sales' }}
       REPEATS: ${{ inputs.repeats || '1' }}
+      LABEL: ${{ inputs.label || '' }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -101,10 +112,15 @@ jobs:
           else
             MODELS="$MODEL"
           fi
-          python evaluation/benchmark.py --models "$MODELS" --repeats "$REPEATS"
+          # --gate fails the job when accuracy drops below evaluation/baseline.json
+          # (or too few questions were scored); suites and models without a baseline aren't gated.
+          python evaluation/benchmark.py --models "$MODELS" --suite "$SUITE" --repeats "$REPEATS" \
+            --label "$LABEL" --gate
       - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: benchmark-results
-          path: evaluation/results/
+          path: |
+            evaluation/results/
+            evaluation/history.jsonl
           if-no-files-found: ignore

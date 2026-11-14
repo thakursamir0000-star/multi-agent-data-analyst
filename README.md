@@ -165,12 +165,14 @@ multi-agent-data-analyst/
 ├── app/
 │   └── main.py                # Streamlit frontend
 ├── evaluation/
-│   ├── benchmark.py           # End-to-end benchmark with pandas ground truth
+│   ├── benchmark.py           # End-to-end benchmark: ground truth, step checks, gate
+│   ├── history.jsonl          # Every recorded benchmark run (trend table)
+│   ├── baseline.json          # Accuracy the regression gate compares against
 │   └── pricing.json           # $/1M tokens per model, for cost per question
 ├── Dockerfile                 # MCP server over HTTP (non-root, remote-safe defaults)
 ├── .github/workflows/ci.yml   # Lint, tests, benchmark
 ├── tests/                     # Unit & integration tests
-├── sample_data/               # Demo dataset + generator
+├── sample_data/               # Sales demo data + held-out support tickets, with generators
 ├── logs/                      # JSONL trace logs (auto-generated)
 ├── requirements.txt
 ├── .env.example
@@ -320,11 +322,33 @@ Each log entry contains:
 
 ## Evaluation
 
-`evaluation/benchmark.py` runs the full graph on 22 questions about `sample_data/sales_sample.csv` whose answers are computed directly in pandas:
-- **15 basic** — totals, rankings, a correlation, a month-level trend, a profit margin, missing values, a top-3;
-- **7 multi-step** — filter + group + compare, e.g. the top region *in 2025*, the average discount on large orders, the category with the highest margin (two categories are 0.2 points apart), the half-year revenue change.
+`evaluation/benchmark.py` runs the full graph on questions whose answers are computed directly in pandas. There are two suites:
+
+- **`sales`, the development set** — 22 questions about `sample_data/sales_sample.csv`. Agent changes are made by studying its failures.
+  - **15 basic:** totals, rankings, a correlation, a month-level trend, a profit margin, missing values, a top-3.
+  - **7 multi-step:** filter + group + compare. Examples: the top region *in 2025*, the average discount on large orders, the category with the highest margin (two categories are 0.2 points apart), the half-year revenue change.
+- **`support`, the held-out set** — 21 questions (8 basic, 13 multi-step) about `sample_data/support_tickets.csv`, a different table of customer-support tickets. It was written before the agent changes and is never used to tune them, so it shows whether an improvement generalizes.
+  - Each filtered question has a different answer from the same question asked of the whole table, so a skipped filter shows up as a miss.
 
 An answer counts as correct when the final insight states the expected number (normal rounding, `%`, `K`/`M` allowed) or every expected name.
+
+**Step checks.** Accuracy alone doesn't say *which agent* went wrong, so for every question that filters rows (a year, a region, a threshold) the benchmark also checks:
+- whether the Planner's sub-tasks mention every condition;
+- whether one code step applies all of them. Each step runs as a separate snippet on the full table, so a filter in one step doesn't carry over to the next.
+
+These checks read the text of the plan and the code, so they are a proxy: a step that mentions a value without filtering on it still passes.
+
+**Failure types.** Every miss gets a type:
+
+| Type | Meaning |
+|---|---|
+| asked for clarification | The question ended in a clarification request instead of an answer |
+| ignored a filter | No step applied the question's filter |
+| wrong time period | The same, when the missing filter is a year |
+| wrong result | Wrong answer, with the filters present |
+| no answer | The pipeline returned an empty answer |
+
+API errors such as rate limits are counted separately and never as misses.
 
 | Metric | Meaning |
 |---|---|
@@ -336,15 +360,26 @@ An answer counts as correct when the final insight states the expected number (n
 | Mean retries | Critic → Coder retries per question |
 | Core-tool share | Steps answered by deterministic tools instead of generated pandas |
 | Latency p50 / p95, tokens and cost per question, cost per correct answer | What an answer costs, from `evaluation/pricing.json` |
+| Filters in the plan / applied in one code step | Step checks over the questions that filter rows |
+| Failure types | Why each miss happened (table above) |
 
 ```bash
-python evaluation/benchmark.py --dry-run                                  # questions + ground truth, no LLM
-python evaluation/benchmark.py                                            # full run, needs GROQ_API_KEY
+python evaluation/benchmark.py --dry-run --suite all                      # questions + ground truth, no LLM
+python evaluation/benchmark.py                                            # sales suite, needs GROQ_API_KEY
+python evaluation/benchmark.py --suite support                            # the held-out suite
 python evaluation/benchmark.py --level multi_step --repeats 3             # harder questions, 3 runs each
 python evaluation/benchmark.py --models openai/gpt-oss-120b,openai/gpt-oss-20b   # side-by-side comparison
+python evaluation/benchmark.py --label after --gate                       # label the run; fail on a regression
+python evaluation/benchmark.py --history                                  # trend table of recorded runs
 ```
 
-A full run uses a large share of Groq's free daily token allowance for one model, so CI doesn't spend it on every push: start it from **Actions → CI → Run workflow** — pick a model or **compare-all**, and 1–3 runs per question — or let the weekly scheduled run do it; the tables appear in the run summary. Per-minute rate limits are retried: each Groq call retries up to `GROQ_API_RETRIES` times (default 6) after Groq's suggested wait, and a question that still fails is retried up to three more times, the later ones after a full minute, because one question can use more tokens than the free tier's 8,000 per minute. Run one evaluation at a time on a shared key. A daily limit stops a model's run early with a note (the next model has its own quota), and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%. Costs use the list prices in `evaluation/pricing.json`; check them against [groq.com/pricing](https://groq.com/pricing) before quoting. `compare-all` runs `openai/gpt-oss-120b`, `openai/gpt-oss-20b` and `qwen/qwen3.8-27b` (Groq retired the Llama 3 models this list used to include); qwen has no price in the file, so its cost shows as –.
+A full run of one suite uses most of Groq's free daily token allowance for one model, so CI doesn't spend it on every push. Start it from **Actions → CI → Run workflow**: pick a model or **compare-all**, a suite, 1–3 runs per question and an optional label. The weekly scheduled run uses the sales suite. The tables appear in the run summary.
+
+**Tracking and the regression gate.**
+- Every run appends one line per suite and model to `evaluation/history.jsonl`: date, commit, label, the counts above and the failure types. `--history` prints them as a trend table.
+- In CI, the updated file is part of the run's artifact, and the summary shows the new lines, so they can be added to the repo.
+- `--gate`, which CI always uses, fails the run when accuracy falls more than 0.10 below `evaluation/baseline.json` for that suite and model.
+- The gate also fails when fewer than 90% of the questions could be scored (for example after rate limits), because an incomplete run can't be compared. Per-minute rate limits are retried: each Groq call retries up to `GROQ_API_RETRIES` times (default 6) after Groq's suggested wait, and a question that still fails is retried up to three more times, the later ones after a full minute, because one question can use more tokens than the free tier's 8,000 per minute. Run one evaluation at a time on a shared key. A daily limit stops a model's run early with a note (the next model has its own quota), and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%. Costs use the list prices in `evaluation/pricing.json`; check them against [groq.com/pricing](https://groq.com/pricing) before quoting. `compare-all` runs `openai/gpt-oss-120b`, `openai/gpt-oss-20b` and `qwen/qwen3.8-27b` (Groq retired the Llama 3 models this list used to include); qwen has no price in the file, so its cost shows as –.
 
 ### Results
 

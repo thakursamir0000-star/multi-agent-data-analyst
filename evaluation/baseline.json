@@ -1,0 +1,11 @@
+{
+  "about": "Regression gate for `benchmark.py --gate`: a run fails when its accuracy is more than max_drop below the baseline for its suite and model, or when fewer than min_scored_share of its questions could be scored. Raise a baseline only after a measured improvement.",
+  "max_drop": 0.1,
+  "min_scored_share": 0.9,
+  "baselines": {
+    "sales:openai/gpt-oss-120b": {
+      "accuracy": 0.773,
+      "source": "CI run 2026-11-01: 17 / 22, the lower of the two runs before the agent-evals work"
+    }
+  }
+}
