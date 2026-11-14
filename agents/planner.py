@@ -14,7 +14,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from agents.llm import count_tokens, get_api_retries, get_model, strip_thinking
+from agents.llm import chat_model, count_tokens, response_text, strip_thinking
 from agents.state import question_with_clarification
 from tools.observability import TOKEN_USAGE_KEY, log_node
 
@@ -127,7 +127,7 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     Reads: user_query, dataframe_profile, human_answer (if re-planning)
     Writes: sub_tasks, current_task_index, messages
     """
-    llm = ChatGroq(model=get_model(), temperature=0.2, max_retries=get_api_retries())
+    llm = chat_model(ChatGroq, temperature=0.2)
 
     # If re-planning after human clarification, the question includes the answer
     user_query = question_with_clarification(state)
@@ -139,7 +139,7 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     ]
 
     response = llm.invoke(messages)
-    sub_tasks = _parse_sub_tasks(strip_thinking(response.content))
+    sub_tasks = _parse_sub_tasks(strip_thinking(response_text(response)))
 
     # Ensure at least one task
     if not sub_tasks:

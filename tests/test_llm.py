@@ -49,16 +49,20 @@ class TestStripThinking:
 
 @pytest.fixture
 def reset_llm_cache():
-    """Clear the module-level caches before and after each test."""
+    """Clear the module-level caches before and after each test (provider: Groq)."""
+    llm._PROVIDER = "groq"
     llm._MODEL = None
     llm._MAX_RETRIES = None
     llm._API_RETRIES = None
     llm._CORE_TOOLS = None
+    llm._REQUESTS_PER_MINUTE = None
     yield
+    llm._PROVIDER = None
     llm._MODEL = None
     llm._MAX_RETRIES = None
     llm._API_RETRIES = None
     llm._CORE_TOOLS = None
+    llm._REQUESTS_PER_MINUTE = None
 
 
 class TestConfigReaders:

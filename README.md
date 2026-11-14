@@ -429,10 +429,14 @@ The suite needs no API key (LLM calls are mocked). It covers the agents and grap
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `GROQ_API_KEY` | (required) | Your Groq API key |
+| `LLM_PROVIDER` | `groq` | `groq` or `gemini` |
+| `GROQ_API_KEY` | (required for Groq) | Your Groq API key |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model to use |
+| `GEMINI_API_KEY` | (required for Gemini) | Your Gemini API key |
+| `GEMINI_MODEL` | `gemini-4-hydrogen` | Gemini model to use |
 | `MAX_RETRIES` | `2` | Max Critic → Coder retries |
-| `GROQ_API_RETRIES` | `6` | Retries of one Groq call after a rate limit (the client waits Groq's suggested time) |
+| `LLM_API_RETRIES` | `6` | Attempts for one LLM call after a rate limit (`GROQ_API_RETRIES` still works) |
+| `LLM_REQUESTS_PER_MINUTE` | `0` (off) | Pace LLM requests below a free tier's per-minute limit |
 | `SANDBOX_TIMEOUT_SECONDS` | `30` | Code execution timeout |
 | `SANDBOX_ISOLATION` | `process` | `process` (separate, killable child) or `thread` (in-process, for development) |
 | `SANDBOX_MAX_MEMORY_MB` | `2048` | Memory limit for sandboxed code (Linux/macOS) |

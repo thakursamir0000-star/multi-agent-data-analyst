@@ -4,23 +4,36 @@ LLM helpers — shared by every agent node.
 Config values are read lazily on first use (not at import time) so that
 Streamlit Cloud secrets are available when they are read.
 
-Each node still constructs its own ``ChatGroq`` so tests can keep
-patching ``agents.<node>.ChatGroq``.
+Two providers, chosen with LLM_PROVIDER:
+- "groq" (default): ChatGroq with GROQ_API_KEY / GROQ_MODEL;
+- "gemini": ChatGoogleGenerativeAI with GEMINI_API_KEY / GEMINI_MODEL.
+
+Each node passes its own ``ChatGroq`` class to ``chat_model`` so tests can
+keep patching ``agents.<node>.ChatGroq``.
 """
 
 from __future__ import annotations
 
 import re
+import sys
+import threading
+import time
+from collections import deque
 from typing import Any
 
 from tools.config import get_env
 
-DEFAULT_MODEL = "openai/gpt-oss-120b"
+DEFAULT_MODEL = "openai/gpt-oss-120b"  # Groq
+DEFAULT_GEMINI_MODEL = "gemini-4-hydrogen"  # free tier; fast enough for the benchmark
+PROVIDERS = ("groq", "gemini")
+_KEY_NAMES = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY"}
 
+_PROVIDER: str | None = None
 _MODEL: str | None = None
 _MAX_RETRIES: int | None = None
 _API_RETRIES: int | None = None
 _CORE_TOOLS: bool | None = None
+_REQUESTS_PER_MINUTE: int | None = None
 
 # A closed <think>...</think> or <thinking>...</thinking> block
 _THINK_BLOCK_RE = re.compile(r"<(think|thinking)>.*?</\1>", flags=re.DOTALL)
@@ -28,11 +41,30 @@ _THINK_BLOCK_RE = re.compile(r"<(think|thinking)>.*?</\1>", flags=re.DOTALL)
 _THINK_OPEN_RE = re.compile(r"<think(?:ing)?>")
 
 
+def get_provider() -> str:
+    """Return the LLM provider (LLM_PROVIDER: groq or gemini), read once on first use."""
+    global _PROVIDER
+    if _PROVIDER is None:
+        provider = get_env("LLM_PROVIDER", "groq").strip().lower() or "groq"
+        if provider not in PROVIDERS:
+            raise ValueError(f"LLM_PROVIDER must be one of {', '.join(PROVIDERS)}, not {provider!r}")
+        _PROVIDER = provider
+    return _PROVIDER
+
+
+def api_key_name() -> str:
+    """The environment variable that holds the active provider's API key."""
+    return _KEY_NAMES[get_provider()]
+
+
 def get_model() -> str:
-    """Return the Groq model name (GROQ_MODEL), read once on first use."""
+    """Return the model name for the active provider (GROQ_MODEL or GEMINI_MODEL), read once."""
     global _MODEL
     if _MODEL is None:
-        _MODEL = get_env("GROQ_MODEL", DEFAULT_MODEL)
+        if get_provider() == "gemini":
+            _MODEL = get_env("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+        else:
+            _MODEL = get_env("GROQ_MODEL", DEFAULT_MODEL)
     return _MODEL
 
 
@@ -45,16 +77,30 @@ def get_max_retries() -> int:
 
 
 def get_api_retries() -> int:
-    """Retries for one Groq call (GROQ_API_RETRIES, default 6), read once on first use.
+    """Attempts for one LLM call after a rate limit (LLM_API_RETRIES, or the
+    older GROQ_API_RETRIES; default 6), read once on first use.
 
     The Groq client waits the time Groq suggests before each retry. Its default
     of 2 wasn't enough on the free tier: one question uses ~8-11k tokens and the
     limit is 8k tokens per minute, so a busy minute failed whole questions.
+    Gemini calls are retried by RetryingChatModel instead (see there).
     """
     global _API_RETRIES
     if _API_RETRIES is None:
-        _API_RETRIES = int(get_env("GROQ_API_RETRIES", "6"))
+        _API_RETRIES = int(get_env("LLM_API_RETRIES", get_env("GROQ_API_RETRIES", "6")))
     return _API_RETRIES
+
+
+def get_requests_per_minute() -> int:
+    """Client-side cap on LLM requests per minute (LLM_REQUESTS_PER_MINUTE, 0 = off).
+
+    Free tiers limit requests per minute per project; pacing requests below
+    that avoids 429s instead of recovering from them.
+    """
+    global _REQUESTS_PER_MINUTE
+    if _REQUESTS_PER_MINUTE is None:
+        _REQUESTS_PER_MINUTE = max(0, int(get_env("LLM_REQUESTS_PER_MINUTE", "0") or 0))
+    return _REQUESTS_PER_MINUTE
 
 
 def core_tools_enabled() -> bool:
@@ -66,6 +112,149 @@ def core_tools_enabled() -> bool:
         value = get_env("ENABLE_CORE_TOOLS", "true").strip().lower()
         _CORE_TOOLS = value not in ("0", "false", "no", "off")
     return _CORE_TOOLS
+
+
+# ── rate limits ─────────────────────────────────────────────────────
+
+_RETRY_AFTER = (
+    re.compile(r"try again in (?:(\d+)m)?([\d.]+)s"),  # Groq: "Please try again in 1m43.2s"
+    re.compile(r"retry in ([\d.]+)s"),  # Gemini: "Please retry in 33.6s."
+    re.compile(r"retryDelay'?\"?:\s*'?\"?([\d.]+)s"),  # Gemini RetryInfo: 'retryDelay': '33s'
+)
+_OVERLOADED = ("UNAVAILABLE", "overloaded", "DEADLINE_EXCEEDED", "INTERNAL", "503", "504")
+
+
+def rate_limit_kind(error: str | None) -> str | None:
+    """"daily" / "minute" for a Groq or Gemini rate-limit error, else None."""
+    if not error or not ("429" in error or "rate limit" in error.lower() or "RESOURCE_EXHAUSTED" in error):
+        return None
+    # Groq says "tokens per day (TPD)"; Gemini's quota IDs say "...PerDayPerProject..."
+    return "daily" if re.search(r"per ?day", error, flags=re.IGNORECASE) else "minute"
+
+
+def retry_after_seconds(error: str, default: float = 30.0) -> float:
+    """The wait the provider suggests in a rate-limit error, in seconds."""
+    groq = _RETRY_AFTER[0].search(error)
+    if groq:
+        return int(groq.group(1) or 0) * 60 + float(groq.group(2))
+    for pattern in _RETRY_AFTER[1:]:
+        match = pattern.search(error)
+        if match:
+            return float(match.group(1))
+    return default
+
+
+_LOCK = threading.Lock()
+_CALL_TIMES: deque[float] = deque()
+_STATS = {"requests": 0, "wait_s": 0.0}
+
+
+def request_stats() -> dict[str, float]:
+    """LLM requests sent (including retried ones) and seconds spent waiting, so far."""
+    with _LOCK:
+        return dict(_STATS)
+
+
+def _pace(rpm: int, sleep=time.sleep, now=time.monotonic) -> None:
+    """Block until a request fits in the last minute's budget, then record it."""
+    while True:
+        with _LOCK:
+            t = now()
+            while _CALL_TIMES and t - _CALL_TIMES[0] >= 60:
+                _CALL_TIMES.popleft()
+            if not rpm or len(_CALL_TIMES) < rpm:
+                _CALL_TIMES.append(t)
+                _STATS["requests"] += 1
+                return
+            wait = 60 - (t - _CALL_TIMES[0]) + 0.05
+            _STATS["wait_s"] += wait
+        sleep(wait)
+
+
+class RetryingChatModel:
+    """A chat model whose ``invoke`` paces and retries requests within bounds.
+
+    - Requests are paced to LLM_REQUESTS_PER_MINUTE (when set).
+    - A per-minute rate limit waits the delay the provider suggests, and at
+      least an exponential backoff (4, 8, 16, ... s); the Gemini SDK's own
+      retries ignore the suggested delay, so they are turned off.
+    - A temporary server error (overloaded, unavailable) backs off exponentially.
+    - A daily quota error is raised at once: retrying can't succeed until it resets.
+    Gives up after ``attempts`` tries.
+    """
+
+    def __init__(self, model: Any, attempts: int, *, rpm: int = 0, max_wait: float = 90.0,
+                 sleep=time.sleep, now=time.monotonic):
+        self.model = model
+        self.attempts = max(1, attempts)
+        self.rpm = rpm
+        self.max_wait = max_wait
+        self._sleep = sleep
+        self._now = now
+
+    def invoke(self, messages: Any, **kwargs: Any) -> Any:
+        for attempt in range(1, self.attempts + 1):
+            _pace(self.rpm, self._sleep, self._now)
+            try:
+                return self.model.invoke(messages, **kwargs)
+            except Exception as e:  # inspected below; anything else is re-raised
+                text = f"{type(e).__name__}: {e}"
+                kind = rate_limit_kind(text)
+                overloaded = kind is None and any(marker in text for marker in _OVERLOADED)
+                if kind == "daily" or not (kind == "minute" or overloaded) or attempt == self.attempts:
+                    raise
+                backoff = min(2.0 ** (attempt + 1), self.max_wait)
+                wait = min(max(retry_after_seconds(text, 0.0) + 1, backoff), self.max_wait)
+                what = "rate limit" if kind else "server busy"
+                print(f"   {what}; retrying in {wait:.0f}s (attempt {attempt + 1}/{self.attempts})",
+                      file=sys.stderr)
+                with _LOCK:
+                    _STATS["wait_s"] += wait
+                self._sleep(wait)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+def chat_model(groq_class: Any, temperature: float) -> RetryingChatModel:
+    """The chat model for one agent call, for the active provider.
+
+    ``groq_class`` is the node's own ``ChatGroq`` import (patched in tests).
+    Groq retries rate limits itself (honouring Groq's suggested wait), so the
+    wrapper doesn't retry it again; Gemini's SDK retries are turned off
+    (``max_retries=1``) and the wrapper retries instead.
+    """
+    rpm = get_requests_per_minute()
+    if get_provider() == "gemini":
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        model = ChatGoogleGenerativeAI(
+            model=get_model(), temperature=temperature, max_retries=1,
+            google_api_key=get_env("GEMINI_API_KEY"),
+        )
+        return RetryingChatModel(model, get_api_retries(), rpm=rpm)
+    model = groq_class(model=get_model(), temperature=temperature, max_retries=get_api_retries())
+    return RetryingChatModel(model, 1, rpm=rpm)
+
+
+# ── responses ───────────────────────────────────────────────────────
+
+def response_text(response: Any) -> str:
+    """The text of a chat response.
+
+    Groq returns a string; Gemini may return a list of content blocks
+    (text, plus reasoning or signatures), of which only the text is kept.
+    """
+    content = getattr(response, "content", "")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict) and block.get("type") == "text":
+                parts.append(str(block.get("text", "")))
+        return "".join(parts)
+    return str(content or "")
 
 
 def strip_thinking(text: str) -> str:

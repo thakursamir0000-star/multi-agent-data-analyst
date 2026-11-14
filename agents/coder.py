@@ -21,7 +21,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from agents.llm import core_tools_enabled, count_tokens, get_api_retries, get_model, strip_thinking
+from agents.llm import chat_model, core_tools_enabled, count_tokens, response_text, strip_thinking
 from agents.state import NewAttempt, question_with_clarification
 from core.datasets import DatasetRegistry
 from core.errors import CoreError
@@ -262,7 +262,7 @@ def coder_node(
         When both are given (and ENABLE_CORE_TOOLS is not false), the LLM
         may answer with a deterministic core tool call instead of code.
     """
-    llm = ChatGroq(model=get_model(), temperature=0.1, max_retries=get_api_retries())
+    llm = chat_model(ChatGroq, temperature=0.1)
 
     sub_tasks = state.get("sub_tasks", [])
     task_idx = state.get("current_task_index", 0)
@@ -297,7 +297,7 @@ def coder_node(
 
     response = llm.invoke(messages)
     llm_responses = [response]
-    code = _extract_code(response.content)
+    code = _extract_code(response_text(response))
 
     # Execute: a core tool call, or code in the sandbox
     local_vars = {"df": df} if df is not None else {}
@@ -318,7 +318,7 @@ def coder_node(
         ]
         retry_response = llm.invoke(retry_messages)
         llm_responses.append(retry_response)
-        code = _extract_code(retry_response.content)
+        code = _extract_code(response_text(retry_response))
         exec_result, tool = _execute(code, local_vars, core)
         response = retry_response  # Use the corrected response for messages
 

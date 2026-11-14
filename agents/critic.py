@@ -14,7 +14,7 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from agents.llm import count_tokens, get_api_retries, get_max_retries, get_model, strip_thinking
+from agents.llm import chat_model, count_tokens, get_max_retries, response_text, strip_thinking
 from agents.state import question_with_clarification
 from tools.observability import TOKEN_USAGE_KEY, log_node
 
@@ -176,7 +176,7 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     Writes: verified_insight OR (critic_feedback + retry_count) OR
             (needs_human_input + human_question)
     """
-    llm = ChatGroq(model=get_model(), temperature=0.1, max_retries=get_api_retries())
+    llm = chat_model(ChatGroq, temperature=0.1)
 
     draft_insight = state.get("draft_insight", "")
     code_outputs = state.get("code_outputs", [])
@@ -193,7 +193,7 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
 
     response = llm.invoke(messages)
     tokens = count_tokens(response)
-    result = _parse_critic_response(strip_thinking(response.content))
+    result = _parse_critic_response(strip_thinking(response_text(response)))
 
     verdict = result["verdict"]  # always "PASS" or "FAIL" after parsing
     issues = result["issues"]
