@@ -15,14 +15,15 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 from agents.llm import count_tokens, get_api_retries, get_max_retries, get_model, strip_thinking
+from agents.state import question_with_clarification
 from tools.observability import TOKEN_USAGE_KEY, log_node
 
 CRITIC_SYSTEM_PROMPT = """\
 /no_think
 You are the **Critic** agent in a multi-agent data analysis system.
 
-Your job: cross-check the Analyst's insight against the actual code
-execution outputs. You are a fact-checker, not a writer.
+Your job: cross-check the Analyst's insight against the user's question
+and the actual code and its outputs. You are a fact-checker, not a writer.
 
 ## Rules
 1. Compare every numerical claim in the insight to the actual stdout
@@ -32,6 +33,17 @@ execution outputs. You are a fact-checker, not a writer.
 3. Check logical consistency: does the insight's conclusion follow from
    the data shown?
 4. If a code execution had an error but the insight ignores it, flag that.
+5. Check the numbers come from the rows the question asks about. Each task
+   runs as a separate snippet on the FULL dataset, so the code (or SQL) that
+   produced a number must itself apply EVERY condition in the question: a
+   year or date range, a region, category or product, a threshold. A filter
+   in another task does not carry over. If a condition is missing, FAIL and
+   name it in "suggestion" (e.g. "filter to region == 'X' before summing").
+6. Check the insight answers the question that was asked: the right measure,
+   time period and grouping.
+7. Set "is_ambiguous" to true ONLY when the user's question itself can be
+   read in two ways that give different answers. Mistakes in the code or the
+   insight are not ambiguity: FAIL with a suggestion instead.
 
 ## Output Format
 Respond with a JSON object (no markdown fences):
@@ -48,13 +60,25 @@ If everything checks out, return:
 
 
 def _format_verification_context(
-    draft_insight: str, code_outputs: list[dict]
+    draft_insight: str,
+    code_outputs: list[dict],
+    question: str = "",
+    plan: list[str] | None = None,
 ) -> str:
     """Build the verification context for the Critic."""
-    parts = ["## Draft Insight\n", draft_insight, "\n\n## Actual Code Outputs\n"]
+    parts = []
+    if question:
+        parts.append(f"## User Question\n{question}\n")
+    if plan:
+        steps = "\n".join(f"{i + 1}. {task}" for i, task in enumerate(plan))
+        parts.append(f"## Plan\n{steps}\n")
+    parts += ["## Draft Insight\n", draft_insight, "\n\n## Actual Code Outputs\n"]
 
     for i, output in enumerate(code_outputs):
         parts.append(f"### Task {i + 1}: {output.get('task', 'N/A')}")
+        if output.get("code"):
+            kind = f"tool call ({output['tool']})" if output.get("tool") else "code"
+            parts.append(f"{kind}:\n```\n{output['code']}\n```")
         if output.get("stdout"):
             parts.append(f"stdout:\n```\n{output['stdout']}\n```")
         if output.get("error"):
@@ -148,7 +172,7 @@ def _parse_critic_response(response_text: str) -> dict[str, Any]:
 def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     """LangGraph node: verify the Analyst's draft insight.
 
-    Reads: draft_insight, code_outputs, retry_count
+    Reads: user_query, human_answer, sub_tasks, draft_insight, code_outputs, retry_count
     Writes: verified_insight OR (critic_feedback + retry_count) OR
             (needs_human_input + human_question)
     """
@@ -158,7 +182,9 @@ def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     code_outputs = state.get("code_outputs", [])
     retry_count = state.get("retry_count", 0)
 
-    context = _format_verification_context(draft_insight, code_outputs)
+    context = _format_verification_context(
+        draft_insight, code_outputs, question_with_clarification(state), state.get("sub_tasks", [])
+    )
 
     messages = [
         SystemMessage(content=CRITIC_SYSTEM_PROMPT),

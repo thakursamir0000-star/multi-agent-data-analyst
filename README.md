@@ -41,10 +41,10 @@ graph TD
 
 | Agent | Role | Temperature |
 |-------|------|-------------|
-| **Planner** | Breaks queries into concrete, pandas-executable sub-tasks | 0.2 |
-| **Coder** | Generates Python code and executes in sandbox | 0.1 |
+| **Planner** | Breaks queries into concrete, self-contained sub-tasks, each stating the question's filters | 0.2 |
+| **Coder** | Generates Python code (or a core tool call) for each sub-task, with the user's question in view | 0.1 |
 | **Analyst** | Turns code outputs into plain-English, data-backed insights | 0.3 |
-| **Critic** | Cross-checks every numerical claim against actual outputs | 0.1 |
+| **Critic** | Checks the answer against the question, the code and its outputs, including that every filter was applied | 0.1 |
 | **HumanInput** | Pauses graph for human clarification when needed | N/A |
 
 ### State Flow
@@ -395,8 +395,19 @@ The grader at the time scored these runs 14 / 22 and 16 / 22. It marked five ans
 What the misses show:
 - **Basic questions are nearly solved.** The one miss in both runs, #11 *"What was the total revenue in 2024?"*, ended in a clarification request instead of an answer.
 - **Multi-step questions are the weak spot** (3 / 7 and 4 / 7). In #17, #21 and #22, in both runs, the answer was computed over the whole table instead of the filtered rows. #21 is the clearest case: the answer says the data was filtered to the West region, but its 1,461 units for Accessory S is that product's total across *all* regions; in the West, Gadget Z leads with 440. #19, the first half of 2024 versus the first half of 2025, was wrong in one run (the full year 2024 was used) and right in the other.
-- **The Critic approved those wrong answers** (3–4 per run). It checks that the code ran and the answer is clear, but not that the question's filter was applied, so this is the next thing to improve.
+- **The Critic approved those wrong answers** (3–4 per run). It checks that the code ran and the answer is clear, but not that the question's filter was applied.
 - Answers cost about $0.002 each at Groq list prices and take about 30 s (p50), mostly several LLM calls between Planner, Coder and Critic.
+
+**Why the filters were lost, and what changed.** Reading the code behind those misses showed four causes, one per agent:
+
+| Cause | Change |
+|---|---|
+| Each sub-task runs as a separate snippet on the full table, but the Planner often made "filter to the West" a sub-task of its own, so the next sub-task summed every region. | The Planner is told that nothing carries over between sub-tasks: every sub-task states all of the question's conditions, and one sub-task is preferred when it can answer the question. |
+| The Coder saw only its sub-task, never the question. Its tool menu also pushed `group_aggregate`, which always uses every row. | The Coder gets the question (and any clarification from the user). The menu says which tools use every row, and that a subset needs `query_sql` with `WHERE` or code. |
+| The Critic saw the answer and the printed outputs, but not the question or the code, so it couldn't notice a missing filter. | The Critic gets the question, the plan and each step's code or tool call. It must fail an answer whose numbers come from a step that skips one of the question's conditions. It asks for clarification only when the question itself is ambiguous. |
+| When the Critic asked for a retry, its feedback reached only the retry's first sub-task: the Coder cleared it after one step. | The feedback stays for every sub-task of the retry; a new plan clears it. |
+
+The held-out `support` suite was written before these changes, and its "before" run uses the code without them. Results for both suites will be added here and to `evaluation/history.jsonl` once measured.
 
 Pick **compare-all** in the workflow to add other models side by side.
 

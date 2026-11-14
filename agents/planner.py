@@ -15,6 +15,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 from agents.llm import count_tokens, get_api_retries, get_model, strip_thinking
+from agents.state import question_with_clarification
 from tools.observability import TOKEN_USAGE_KEY, log_node
 
 PLANNER_SYSTEM_PROMPT = """\
@@ -34,13 +35,24 @@ when completed sequentially, will fully answer the question.
 4. If a visualization is needed, include a separate sub-task for it
    (e.g., "Create a bar chart of top 5 categories by revenue").
 5. Limit to 5 sub-tasks maximum. If the query is simple, 1-2 is fine.
-6. Output ONLY the JSON array. No thinking, no explanation, no markdown.
+6. Sub-tasks run independently: each one is a separate snippet on the FULL
+   dataset, and nothing (variables, filtered tables) carries over to the next.
+   So every sub-task that computes a number must itself state ALL the
+   conditions the question sets: the time period, the group (e.g. a region,
+   category or product) and any threshold. Never make "filter the rows" a
+   sub-task of its own.
+7. Prefer ONE sub-task that answers the question when that is possible; add
+   more only for genuinely separate parts (e.g. a chart, a second period).
+8. Output ONLY the JSON array. No thinking, no explanation, no markdown.
 
 ## Output format
 ["task 1", "task 2"]
 
-Example:
-["Group by 'product', sum 'revenue', sort descending", "Take top 5 results", "Create a horizontal bar chart of the top 5"]
+Examples:
+["Group by 'product', sum 'revenue', sort descending, take the top 5", "Create a horizontal bar chart of the top 5 products by summed 'revenue'"]
+
+For "Which store had the highest average order value in March 2024?":
+["Keep rows where 'order_date' is in March 2024, group by 'store', take the mean of 'order_value', sort descending and print the top store with its value"]
 """
 
 
@@ -117,16 +129,9 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     """
     llm = ChatGroq(model=get_model(), temperature=0.2, max_retries=get_api_retries())
 
-    user_query = state["user_query"]
+    # If re-planning after human clarification, the question includes the answer
+    user_query = question_with_clarification(state)
     profile_text = state.get("dataframe_profile", "")
-
-    # If re-planning after human clarification, incorporate the answer
-    human_answer = state.get("human_answer", "")
-    if human_answer:
-        user_query = (
-            f"{user_query}\n\n"
-            f"[Clarification from user]: {human_answer}"
-        )
 
     messages = [
         SystemMessage(content=PLANNER_SYSTEM_PROMPT),
@@ -143,6 +148,7 @@ def planner_node(state: dict[str, Any]) -> dict[str, Any]:
     return {
         "sub_tasks": sub_tasks,
         "current_task_index": 0,
+        "critic_feedback": "",  # a new plan starts without the old plan's feedback
         "messages": [
             HumanMessage(content=user_query),
             response,

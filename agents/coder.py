@@ -22,7 +22,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
 from agents.llm import core_tools_enabled, count_tokens, get_api_retries, get_model, strip_thinking
-from agents.state import NewAttempt
+from agents.state import NewAttempt, question_with_clarification
 from core.datasets import DatasetRegistry
 from core.errors import CoreError
 from core.schemas import ChartResult
@@ -85,6 +85,11 @@ Examples:
 {"tool": "make_chart", "arguments": {"chart_type": "bar", "x": "category",
 "y": "revenue", "agg": "sum", "limit": 5}}
 
+describe, group_aggregate, correlate, detect_anomalies and make_chart always
+use EVERY row of the dataset. When the task needs only some rows (a year or
+date range, one region or category, a threshold), use query_sql with a WHERE
+clause, or write code; an unfiltered tool would answer for the whole table.
+
 Write Python code only when no tool fits: derived columns, date parsing,
 reshaping, multi-step logic or a custom plot.
 """
@@ -103,9 +108,19 @@ def _build_coder_prompt(
     critic_feedback: str = "",
     previous_error: str = "",
     tools: bool = False,
+    question: str = "",
 ) -> str:
     """Build the human message for the coder."""
     parts = [f"## Dataset Profile\n{profile_text}\n"]
+
+    if question:
+        # The task is one step of the plan; the question carries its conditions.
+        parts.append(
+            f"## User Question\n{question}\n\n"
+            "The task below is one step towards answering this question. `df` (and the "
+            "SQL table) always hold the FULL dataset: apply every condition the question "
+            "sets (time period, region/category/product, thresholds) to the rows you use.\n"
+        )
 
     if critic_feedback:
         parts.append(f"## Critic Feedback (fix this)\n{critic_feedback}\n")
@@ -253,6 +268,7 @@ def coder_node(
     task_idx = state.get("current_task_index", 0)
     profile_text = state.get("dataframe_profile", "")
     critic_feedback = state.get("critic_feedback", "")
+    question = question_with_clarification(state)
 
     if task_idx >= len(sub_tasks):
         return {"current_task_index": task_idx}
@@ -271,6 +287,7 @@ def coder_node(
         profile_text=profile_text,
         critic_feedback=critic_feedback,
         tools=core is not None,
+        question=question,
     )
 
     messages = [
@@ -293,6 +310,7 @@ def coder_node(
             profile_text=profile_text,
             previous_error=exec_result["error"],
             tools=core is not None,
+            question=question,
         )
         retry_messages = [
             SystemMessage(content=system_prompt),
@@ -320,7 +338,8 @@ def coder_node(
         # previous attempt's outputs instead of appending to them
         "code_outputs": NewAttempt([output_record]) if task_idx == 0 else [output_record],
         "current_task_index": task_idx + 1,
-        "critic_feedback": "",  # Clear critic feedback after processing
+        # critic_feedback is kept: on a Critic retry every task of the new
+        # attempt needs it, not just the first (the Planner clears it).
         "messages": [response],
         # Both the initial attempt and any self-correction retry
         TOKEN_USAGE_KEY: count_tokens(*llm_responses),

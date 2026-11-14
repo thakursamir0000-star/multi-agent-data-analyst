@@ -27,6 +27,18 @@ class NewAttempt(list):
     """
 
 
+def question_with_clarification(state: dict) -> str:
+    """The user's question, plus their answer if they were asked to clarify it.
+
+    Planner, Coder and Critic all work from this text, so a clarification
+    reaches every agent, not only the re-plan.
+    """
+    question = state.get("user_query", "")
+    if state.get("human_answer"):
+        question += f"\n\n[Clarification from user]: {state['human_answer']}"
+    return question
+
+
 def _append_or_new_attempt(existing: list, new: list) -> list:
     """Reducer for code_outputs: append, or replace on a NewAttempt."""
     if isinstance(new, NewAttempt):
