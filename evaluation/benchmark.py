@@ -1,8 +1,10 @@
 """
 End-to-end benchmark for the multi-agent pipeline.
 
-    python evaluation/benchmark.py                    # sales questions (needs GROQ_API_KEY)
+    python evaluation/benchmark.py                    # sales questions (needs the provider's API key)
     python evaluation/benchmark.py --suite support    # held-out support-ticket questions
+    python evaluation/benchmark.py --suite support --label after --resume   # finish an interrupted run
+    LLM_PROVIDER=gemini python evaluation/benchmark.py   # Gemini instead of Groq (GEMINI_API_KEY)
     python evaluation/benchmark.py --limit 5          # first 5 questions
     python evaluation/benchmark.py --level multi_step --repeats 3
     python evaluation/benchmark.py --models openai/gpt-oss-120b,openai/gpt-oss-20b
@@ -30,9 +32,14 @@ ignored a filter, wrong time period, wrong result, no answer); API errors are
 counted separately. Every run is appended to evaluation/history.jsonl, and
 --gate fails the run when accuracy drops below evaluation/baseline.json.
 
-A per-minute Groq rate limit is waited out once per question; a daily limit
-stops the run (the remaining questions can't succeed until it resets), and a
-run in which no question could be scored exits with an error.
+Rate limits: each LLM call is paced (LLM_REQUESTS_PER_MINUTE) and retried
+within bounds by agents/llm.py; a question that still hits a per-minute limit
+is retried with exponential backoff. A daily limit stops the run (the
+remaining questions can't succeed until it resets). Every finished question
+is saved to evaluation/results/progress/ as it completes, and --resume reuses
+those answers, so an interrupted run never repeats a finished question. Only
+finished runs go into the history, and a run in which no question could be
+scored exits with an error.
 
 The full graph (planner → coder → analyst → critic) answers
 it exactly as the app and the MCP analyze_question tool do, and the final
@@ -67,6 +74,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from agents.llm import rate_limit_kind, request_stats, retry_after_seconds  # noqa: E402,F401
 from core.datasets import DatasetRegistry  # noqa: E402
 
 DATA_FILE = ROOT / "sample_data" / "sales_sample.csv"
@@ -345,6 +353,7 @@ def failure_type(result: dict) -> str | None:
 def run_case(case: dict, registry: DatasetRegistry, dataset_id: str, profile_text: str) -> dict:
     from agents.graph import build_graph, create_initial_state
 
+    stats_before = request_stats()
     start = time.perf_counter()
     try:
         graph = build_graph(registry=registry, dataset_id=dataset_id)
@@ -354,6 +363,7 @@ def run_case(case: dict, registry: DatasetRegistry, dataset_id: str, profile_tex
     except Exception as e:  # an API error shouldn't stop the whole benchmark
         final, error = {}, f"{type(e).__name__}: {e}"
     latency = time.perf_counter() - start
+    stats = request_stats()
 
     escalated = bool(final.get("__interrupt__"))
     answer = "" if escalated else (final.get("verified_insight") or final.get("draft_insight") or "")
@@ -376,6 +386,9 @@ def run_case(case: dict, registry: DatasetRegistry, dataset_id: str, profile_tex
         "input_tokens": sum(e.get("input_tokens", 0) for e in trace),
         "output_tokens": sum(e.get("output_tokens", 0) for e in trace),
         "latency_s": round(latency, 2),
+        # LLM requests sent (retries included) and time spent waiting on rate limits
+        "requests": int(stats["requests"] - stats_before["requests"]),
+        "wait_s": round(stats["wait_s"] - stats_before["wait_s"], 1),
         "error": error,
         # What each agent did, for the step checks and for reading the misses
         "plan": plan,
@@ -388,30 +401,18 @@ def run_case(case: dict, registry: DatasetRegistry, dataset_id: str, profile_tex
     return result
 
 
-_RETRY_AFTER = re.compile(r"try again in (?:(\d+)m)?([\d.]+)s")
-
-
-def rate_limit_kind(error: str | None) -> str | None:
-    """"daily" / "minute" for a Groq rate-limit error, else None."""
-    if not error or not ("429" in error or "rate limit" in error.lower()):
-        return None
-    return "daily" if "per day" in error else "minute"
-
-
-def retry_after_seconds(error: str, default: float = 30.0) -> float:
-    match = _RETRY_AFTER.search(error)
-    return int(match.group(1) or 0) * 60 + float(match.group(2)) if match else default
-
-
-def run_all(cases: list[dict], runner, sleep=time.sleep, max_wait: float = 120.0,
-            minute_retries: int = 3) -> tuple[list[dict], str | None]:
+def run_all(cases: list[dict], runner, sleep=time.sleep, max_wait: float = 240.0,
+            minute_retries: int = 3, on_result=None) -> tuple[list[dict], str | None]:
     """Run every case; retry per-minute limits, stop at a daily limit.
 
-    A question that hits the per-minute limit is retried up to `minute_retries`
-    times: first after Groq's suggested wait, then after a full minute so the
-    window clears (one question can use more tokens than a free-tier minute
-    allows). Returns (results, stop_reason). After a daily limit the remaining
-    questions can't succeed until the quota resets, so they aren't attempted.
+    A question that still hits a per-minute limit after the client's own
+    retries is retried up to `minute_retries` times: first after the
+    provider's suggested wait, then with exponential backoff from a full
+    minute (60 s, 120 s, ...), since one question can use more tokens than a
+    free-tier minute allows. `on_result` is called with each finished result
+    (to save progress). Returns (results, stop_reason). After a daily limit
+    the remaining questions can't succeed until the quota resets, so they
+    aren't attempted.
     """
     results = []
     for case in cases:
@@ -419,7 +420,10 @@ def run_all(cases: list[dict], runner, sleep=time.sleep, max_wait: float = 120.0
         for attempt in range(minute_retries):
             if rate_limit_kind(result["error"]) != "minute":
                 break
-            wait = min(retry_after_seconds(result["error"]) + 2, max_wait) if attempt == 0 else 60.0
+            if attempt == 0:
+                wait = min(retry_after_seconds(result["error"]) + 2, max_wait)
+            else:
+                wait = min(60.0 * 2 ** (attempt - 1), max_wait)
             print(f"   per-minute rate limit; waiting {wait:.0f}s and retrying #{case['id']}")
             sleep(wait)
             result = runner(case)
@@ -431,11 +435,60 @@ def run_all(cases: list[dict], runner, sleep=time.sleep, max_wait: float = 120.0
         if result["error"]:
             print(f"     {result['error'][:200]}")
         results.append(result)
+        if on_result is not None:
+            on_result(result)
         if rate_limit_kind(result["error"]) == "daily":
             skipped = len(cases) - len(results)
-            return results, (f"Groq's daily token limit was reached after {len(results)} question(s); "
-                             f"{skipped} not run. Rerun after the quota resets or with --models <another model>.")
+            return results, (f"The provider's daily limit was reached after {len(results)} question(s); "
+                             f"{skipped} not run. Finish with --resume after the quota resets.")
     return results, None
+
+
+# ── saving progress, so an interrupted run can resume ───────────────
+
+PROGRESS_DIR = RESULTS_DIR / "progress"
+
+
+def progress_path(suite: str, model: str, label: str, repeats: int, root: Path = PROGRESS_DIR) -> Path:
+    """One file per run: suite, model, label and number of repeats."""
+    slug = re.sub(r"[^A-Za-z0-9._]+", "-", f"{suite}__{model}__{label or 'run'}__x{repeats}").strip("-")
+    return root / f"{slug}.jsonl"
+
+
+def load_progress(path: Path) -> dict[tuple[int, int], dict]:
+    """Finished questions of an earlier attempt at this run, by (id, repeat).
+
+    Questions that ended in an API error are left out, so a resumed run
+    tries them again; the latest line for a question wins.
+    """
+    done: dict[tuple[int, int], dict] = {}
+    if not path.exists():
+        return done
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        result = json.loads(line)
+        key = (result["id"], result.get("repeat", 1))
+        if result.get("error"):
+            done.pop(key, None)
+        else:
+            done[key] = result
+    return done
+
+
+def save_progress(path: Path, result: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(result, default=str) + "\n")
+
+
+def start_progress(path: Path, resume: bool) -> dict[tuple[int, int], dict]:
+    """The finished questions to reuse; a fresh run keeps an old file as *.old."""
+    if resume:
+        return load_progress(path)
+    if path.exists():
+        path.replace(path.with_name(f"{path.stem}.{time.strftime('%Y%m%d-%H%M%S')}.old"))
+    return {}
 
 
 def load_prices(path: Path = PRICING_FILE) -> dict[str, dict[str, float]]:
@@ -479,6 +532,10 @@ def summarize(cases: list[dict], planned: int | None = None, price: dict[str, fl
         "latency_s_p50": round(float(np.percentile(latencies, 50)), 2) if latencies else None,
         "latency_s_p95": round(float(np.percentile(latencies, 95)), 2) if latencies else None,
         "tokens_per_question": mean([c["tokens"] for c in scored], 1),
+        # Every request counts toward a free tier's daily quota, failed ones included
+        "requests": sum(c.get("requests", 0) for c in cases),
+        "requests_per_question": mean([c.get("requests", 0) for c in scored], 1),
+        "wait_s_per_question": mean([c.get("wait_s", 0.0) for c in scored], 1),
         "filter_questions": len(filtered),
         "plan_filter_rate": mean([float(bool(c["plan_has_filters"])) for c in filtered]),
         "code_filter_rate": mean([float(bool(c["code_has_filters"])) for c in filtered]),
@@ -566,6 +623,10 @@ def markdown(summary: dict, cases: list[dict], model: str, stop_reason: str | No
             f"| {s.get('filter_questions', 0)} | {_fmt(s.get('plan_filter_rate'))} | "
             f"{_fmt(s.get('code_filter_rate'))} | {s['verified_but_wrong']} | {failure_counts(s.get('failures'))} |",
         ]
+    if s.get("requests"):
+        lines += ["", f"LLM requests: {s['requests']} ({_fmt(s.get('requests_per_question'))} per scored question); "
+                      f"{_fmt(s.get('wait_s_per_question'), ' s')} per question spent waiting on rate limits "
+                      "(included in latency)."]
     if s["consistent_share"] is not None:
         lines += ["", f"Same outcome in every run for {s['consistent_share']:.0%} of questions."]
     misses = [c for c in cases if not c["correct"]]
@@ -625,7 +686,8 @@ def history_entry(report: dict, label: str = "", commit: str = "", date: str | N
     s = report["summary"]
     keys = ("questions", "scored", "errors", "correct", "scored_basic", "correct_basic", "scored_multi_step",
             "correct_multi_step", "accuracy", "verified_but_wrong", "escalations", "filter_questions",
-            "plan_filter_rate", "code_filter_rate", "failures", "tokens_per_question", "latency_s_p50")
+            "plan_filter_rate", "code_filter_rate", "failures", "tokens_per_question", "requests_per_question",
+            "latency_s_p50")
     return {
         "date": date or time.strftime("%Y-%m-%d", time.gmtime()),
         "commit": commit,
@@ -714,9 +776,12 @@ def main() -> None:
     parser.add_argument("--limit", type=int, help="only the first N questions (after --level)")
     parser.add_argument("--level", choices=[*LEVELS, "all"], default="all")
     parser.add_argument("--repeats", type=int, default=1, help="run every question N times")
-    parser.add_argument("--models", help="comma-separated Groq models to compare")
-    parser.add_argument("--model", help="a single Groq model (same as --models with one entry)")
+    parser.add_argument("--models", help="comma-separated models of the active provider (LLM_PROVIDER) to compare")
+    parser.add_argument("--model", help="a single model (same as --models with one entry)")
     parser.add_argument("--label", default="", help="note stored with the run in history.jsonl, e.g. before/after")
+    parser.add_argument("--resume", action="store_true",
+                        help="reuse the questions an interrupted run with the same suite, model, label and "
+                             "repeats already finished (saved in evaluation/results/progress/)")
     parser.add_argument("--gate", action="store_true", help="fail if accuracy drops below evaluation/baseline.json")
     parser.add_argument("--no-history", action="store_true", help="don't append the run to history.jsonl")
     parser.add_argument("--history", action="store_true", help="print the trend table of recorded runs and exit")
@@ -747,11 +812,13 @@ def main() -> None:
 
     from tools.config import get_env
 
-    if not get_env("GROQ_API_KEY"):
-        raise SystemExit("The benchmark needs GROQ_API_KEY (or use --dry-run).")
     import agents.llm as agent_llm
 
+    if not get_env(agent_llm.api_key_name()):
+        raise SystemExit(f"The benchmark needs {agent_llm.api_key_name()} (or use --dry-run).")
     models = [m.strip() for m in (args.models or args.model or agent_llm.get_model()).split(",") if m.strip()]
+    commit = current_commit()
+    repeats = max(args.repeats, 1)
     prices = load_prices()
     registry = DatasetRegistry(data_dir=None, max_bytes=50 * 1024 * 1024)
     datasets = {}
@@ -765,16 +832,31 @@ def main() -> None:
         for name, spec, _, cases in suites:
             dataset_id, profile_text = datasets[name]
             # Run-major order: if a daily limit stops the run, the earlier runs are complete.
-            jobs = [{**c, "repeat": r} for r in range(1, max(args.repeats, 1) + 1) for c in cases]
-            print(f"\n== {model} · {name} ({len(jobs)} runs)")
-            results, stop_reason = run_all(
-                jobs, lambda case, ds=dataset_id, pt=profile_text: run_case(case, registry, ds, pt))
+            jobs = [{**c, "repeat": r} for r in range(1, repeats + 1) for c in cases]
+            path = progress_path(name, model, args.label, repeats)
+            done = start_progress(path, args.resume)
+            todo = [j for j in jobs if (j["id"], j["repeat"]) not in done]
+            print(f"\n== {agent_llm.get_provider()} {model} · {name} ({len(jobs)} runs"
+                  + (f", {len(jobs) - len(todo)} reused from {path.name}" if done else "") + ")")
+            if {r.get("commit") for r in done.values()} - {commit}:
+                print(f"   note: reused answers come from commit(s) {sorted({r.get('commit') for r in done.values()})}"
+                      f", this is {commit}")
+
+            def save(result, path=path):
+                result["commit"] = commit
+                save_progress(path, result)
+
+            new, stop_reason = run_all(
+                todo, lambda case, ds=dataset_id, pt=profile_text: run_case(case, registry, ds, pt), on_result=save)
+            finished = {**done, **{(r["id"], r["repeat"]): r for r in new}}
+            results = [finished[(j["id"], j["repeat"])] for j in jobs if (j["id"], j["repeat"]) in finished]
             summary = summarize(results, planned=len(jobs), price=prices.get(model))
             reports.append({"model": model, "suite": name, "dataset": spec["file"].name, "summary": summary,
                             "stop_reason": stop_reason, "results": results})
 
     text = report_markdown(reports)
-    entries = [history_entry(r, label=args.label, commit=current_commit()) for r in reports]
+    # Only finished runs go into the history; a run stopped by a daily limit is resumed instead.
+    entries = [history_entry(r, label=args.label, commit=commit) for r in reports if not r["stop_reason"]]
     text += ("\n\n<details><summary>History entries (evaluation/history.jsonl)</summary>\n\n```json\n"
              + "\n".join(json.dumps(e, default=str) for e in entries) + "\n```\n\n</details>")
     failures, notes = gate(reports, load_baseline()) if args.gate else ([], [])
@@ -787,6 +869,9 @@ def main() -> None:
     if not args.no_history:
         append_history(entries)
     print("\n" + text)
+    if any(r["stop_reason"] for r in reports):
+        print("\nNot finished: rerun the same command with --resume after the quota resets. "
+              "Finished questions are kept in evaluation/results/progress/.")
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
             f.write("## Multi-agent benchmark\n\n" + text + "\n")

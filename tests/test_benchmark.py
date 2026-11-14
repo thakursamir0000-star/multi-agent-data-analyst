@@ -154,7 +154,7 @@ def test_daily_limit_stops_the_run():
 
     results, reason = benchmark.run_all(CASES, runner, sleep=lambda s: pytest.fail("no waiting on daily"))
     assert calls == [1, 2, 3] and len(results) == 3
-    assert "daily token limit" in reason and "2 not run" in reason
+    assert "daily limit was reached" in reason and "2 not run" in reason and "--resume" in reason
 
 
 def test_minute_limit_is_waited_out_once():
@@ -187,7 +187,7 @@ def test_a_question_still_limited_after_three_retries_is_an_error():
     waits = []
     results, reason = benchmark.run_all(
         CASES, lambda case: _result(case, error=MINUTE if case["id"] == 2 else None), sleep=waits.append)
-    assert waits == [pytest.approx(8.5), 60.0, 60.0]
+    assert waits == [pytest.approx(8.5), 60.0, 120.0]  # suggested wait, then exponential backoff
     assert results[1]["error"] and reason is None and len(results) == len(CASES)
 
 

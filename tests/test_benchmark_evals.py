@@ -228,3 +228,42 @@ def test_api_errors_print_as_errors_not_misses(capsys):
 
 def test_history_entry_is_json_serializable():
     json.dumps(history_entry(_report(20), commit=benchmark.current_commit()))
+
+
+# ── saving progress and resuming ────────────────────────────────────
+
+def test_each_finished_question_is_saved_as_it_completes(tmp_path):
+    path = benchmark.progress_path("support", "gemini-4-hydrogen", "before", 1, root=tmp_path)
+    assert path.name == "support__gemini-4-hydrogen__before__x1.jsonl"
+    saved = []
+    benchmark.run_all([{"id": 1, "question": "q"}, {"id": 2, "question": "q"}],
+                      lambda c: _scored(c["id"], True),
+                      on_result=lambda r: (saved.append(r["id"]), benchmark.save_progress(path, r)))
+    assert saved == [1, 2] and len(path.read_text(encoding="utf-8").splitlines()) == 2
+
+
+def test_resume_reuses_finished_questions_and_retries_errors(tmp_path):
+    path = tmp_path / "run.jsonl"
+    benchmark.save_progress(path, {**_scored(1, True), "repeat": 1})
+    benchmark.save_progress(path, {**_scored(2, False), "repeat": 1, "error": "RateLimitError 429 PerDay"})
+    benchmark.save_progress(path, {**_scored(3, False), "repeat": 1})
+    benchmark.save_progress(path, {**_scored(3, True), "repeat": 1})   # a later line wins
+    done = benchmark.start_progress(path, resume=True)
+    assert set(done) == {(1, 1), (3, 1)} and done[(3, 1)]["correct"] is True  # #2 must run again
+
+
+def test_a_fresh_run_keeps_the_old_progress_file(tmp_path):
+    path = tmp_path / "run.jsonl"
+    benchmark.save_progress(path, _scored(1, True))
+    assert benchmark.start_progress(path, resume=False) == {}
+    assert not path.exists() and len(list(tmp_path.glob("run.*.old"))) == 1
+
+
+def test_request_counts_are_summarized():
+    results = [{**_scored(1, True), "requests": 4, "wait_s": 0.0},
+               {**_scored(2, False), "requests": 6, "wait_s": 12.0},
+               {**_scored(3, False), "requests": 2, "error": "RateLimitError 429"}]
+    s = summarize(results)
+    assert s["requests"] == 12  # failed requests count toward a free quota too
+    assert s["requests_per_question"] == 5.0 and s["wait_s_per_question"] == 6.0
+    assert "LLM requests: 12 (5.0 per scored question)" in benchmark.markdown(s, results, "m")

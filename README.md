@@ -367,6 +367,8 @@ API errors such as rate limits are counted separately and never as misses.
 python evaluation/benchmark.py --dry-run --suite all                      # questions + ground truth, no LLM
 python evaluation/benchmark.py                                            # sales suite, needs GROQ_API_KEY
 python evaluation/benchmark.py --suite support                            # the held-out suite
+python evaluation/benchmark.py --suite support --label after --resume     # finish an interrupted run
+LLM_PROVIDER=gemini LLM_REQUESTS_PER_MINUTE=10 python evaluation/benchmark.py   # on Gemini's free tier
 python evaluation/benchmark.py --level multi_step --repeats 3             # harder questions, 3 runs each
 python evaluation/benchmark.py --models openai/gpt-oss-120b,openai/gpt-oss-20b   # side-by-side comparison
 python evaluation/benchmark.py --label after --gate                       # label the run; fail on a regression
@@ -374,6 +376,12 @@ python evaluation/benchmark.py --history                                  # tren
 ```
 
 A full run of one suite uses most of Groq's free daily token allowance for one model, so CI doesn't spend it on every push. Start it from **Actions → CI → Run workflow**: pick a model or **compare-all**, a suite, 1–3 runs per question and an optional label. The weekly scheduled run uses the sales suite. The tables appear in the run summary.
+
+**Interrupted runs and request budgets.**
+- Each finished question is saved to `evaluation/results/progress/` as soon as it completes.
+- `--resume` reuses those answers and runs only the rest. Questions that ended in an API error are run again; finished ones never are.
+- Free tiers count requests as well as tokens, so the report also shows the LLM requests per question and the time spent waiting on rate limits.
+- Only finished runs go into the history. A run stopped by a daily limit says so and is finished later with `--resume`.
 
 **Tracking and the regression gate.**
 - Every run appends one line per suite and model to `evaluation/history.jsonl`: date, commit, label, the counts above and the failure types. `--history` prints them as a trend table.
