@@ -393,7 +393,9 @@ A full run of one suite uses most of Groq's free daily token allowance for one m
 
 ### Results
 
-Two CI runs with `openai/gpt-oss-120b`, one pass over the 22 questions each:
+#### Starting point
+
+Two CI runs with `openai/gpt-oss-120b` on Groq, one pass over the 22 sales questions each:
 
 | Run | Accuracy | Basic | Multi-step | Verified but wrong | Clarification requests | Latency p50 / p95 | Tokens / question | Cost / question |
 |---|---|---|---|---|---|---|---|---|
@@ -417,7 +419,43 @@ What the misses show:
 | The Critic saw the answer and the printed outputs, but not the question or the code, so it couldn't notice a missing filter. | The Critic gets the question, the plan and each step's code or tool call. It must fail an answer whose numbers come from a step that skips one of the question's conditions. It asks for clarification only when the question itself is ambiguous. |
 | When the Critic asked for a retry, its feedback reached only the retry's first sub-task: the Coder cleared it after one step. | The feedback stays for every sub-task of the retry; a new plan clears it. |
 
-The held-out `support` suite was written before these changes, and its "before" run uses the code without them. Results for both suites will be added here and to `evaluation/history.jsonl` once measured.
+#### Before → after, measured
+
+**How it was measured:**
+- **Same model on both sides:** `openai/gpt-oss-120b` through OpenRouter. Every call was pinned to one upstream provider (Prime Intellect) with fallbacks off. All 1,268 answered calls were served by it.
+- **"Before"** ran a copy of this code with the Planner, Coder, Critic and state from before the fixes. Everything else (benchmark, tools, data, provider settings) was identical, checked file by file.
+- **Size:** both suites, 3 runs per question per side, so 258 answers in total. There were 0 API errors, and OpenRouter billed **US$0.052** for all of it.
+- **Held-out set:** the `support` suite was written before the fixes and wasn't used to tune them.
+- **Not mixed with the CI runs above:** those used another provider, so their numbers are kept separate.
+
+| | Support (held out) | Sales (development) | **Both suites** |
+|---|---|---|---|
+| Correct, before → after | 52 / 63 (82.5%) → **58 / 63 (92.1%)** | 58 / 66 (87.9%) → **63 / 66 (95.5%)** | **110 / 129 (85.3%) → 121 / 129 (93.8%)** |
+| Correct in each of the 3 runs | 17, 18, 17 → 20, 18, 20 (of 21) | 18, 20, 20 → 20, 22, 21 (of 22) | |
+| Multi-step | 28 / 39 → **34 / 39** | 14 / 21 → **19 / 21** | **42 / 60 (70%) → 53 / 60 (88%)** |
+| Critic approved a wrong answer | 11 → 5 | 7 → 3 | **18 → 8** |
+| LLM calls per question | 5.6 → 4.3 | 5.6 → 4.3 | about 23% fewer |
+| Tokens per question | 6,130 → 4,301 | 6,242 → 4,549 | about 29% fewer |
+| Latency p50 / p95 | 11.8 / 30.9 s → 8.6 / 14.7 s | 9.2 / 26.2 s → 6.8 / 10.8 s | slowest answers about twice as fast |
+
+**What changed:**
+- **The fixed questions are the split-filter pattern.** Before, the plan filtered in one step (for example, keep Billing tickets from 2024), then ran `describe` or `group_aggregate` over the whole table in the next. After, a single step applies the filter itself: `query_sql` with `WHERE`, or a filtered DataFrame.
+  - #112 and #115 went from 0 / 3 to 3 / 3.
+  - #110 and #119 went from 1 / 3 to 3 / 3.
+  - #21 and #22 went from 0 / 3 to 2 / 3.
+- **Cheaper and faster:** the Critic approved fewer wrong answers, and answers took fewer calls and tokens, with the slowest about twice as fast.
+- **Significance:**
+  - **By run, it is significant:** 17 answers went from wrong to right and 6 from right to wrong (exact McNemar p = 0.035, treating the three runs as independent).
+  - **By question, it isn't conclusive yet:** 9 questions got better and 4 got worse (sign test p = 0.27).
+
+**Still wrong, and next:**
+- **#121, "Which team resolves Urgent tickets fastest?":** the Planner filters `priority == 'High'` on both sides.
+  - The "before" answers count as correct only because the name grader accepts an expected name anywhere in the answer, and those answers listed every team.
+  - Scored strictly, both sides miss it.
+- **Sales #6 and #21 in some runs:** the Coder returned code with literal `\n` instead of line breaks, so the code didn't run.
+- **The name grader is too lenient:** an answer that lists every option still passes. It affects both sides, and it's the next grader fix.
+
+The regression gate's baseline is unchanged: CI benchmarks `gpt-oss-120b` on Groq, and these runs used another provider. A run with Gemma 4 31B on the free Gemini tier is still in progress and will be reported separately.
 
 Pick **compare-all** in the workflow to add other models side by side.
 
