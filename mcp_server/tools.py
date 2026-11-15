@@ -331,10 +331,11 @@ def _register_analyze_question(server: MCPServer, state: ServerState) -> None:
         question = question.strip()
         if not question or len(question) > MAX_QUESTION_CHARS:
             raise ToolError(f"question must be 1-{MAX_QUESTION_CHARS} characters")
+        from agents.llm import api_key_name
         from tools.config import get_env
 
-        if not get_env("GROQ_API_KEY"):
-            raise ToolError("analyze_question needs GROQ_API_KEY in the server's environment")
+        if not get_env(api_key_name()):
+            raise ToolError(f"analyze_question needs {api_key_name()} in the server's environment")
         with _tool_errors():
             scope = state.scopes.resolve(session)
             profile_text = scope.registry.get_profile_text(dataset_id)

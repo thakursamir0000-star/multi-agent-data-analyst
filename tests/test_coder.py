@@ -479,3 +479,32 @@ class TestCoderCoreTools:
         output = result["code_outputs"][0]
         assert output["tool"] is None  # the reply went to the sandbox
         assert output["error"] is None and output["stdout"] == ""
+
+
+# ── Escaped newlines (OpenRouter run, sales #6 and #21) ─────────────
+
+from agents.coder import _unescape_newlines  # noqa: E402
+from tools.sandbox import run_code  # noqa: E402
+
+# Saved verbatim from the failing 2026-11-15 answers: one line, literal backslash-n
+ESCAPED_6 = ("df_south = df[df['region'] == 'South']\\nif df_south.empty:\\n    total_qty = 0\\nelse:\\n"
+             "    total_qty = df_south['quantity'].sum()\\nprint('Total quantity sold in South region:', total_qty)")
+
+
+class TestEscapedNewlines:
+    def test_escaped_snippet_is_repaired_and_runs(self):
+        assert "\n" not in ESCAPED_6 and "\\n" in ESCAPED_6  # the bug's input: no real line breaks
+        code = _extract_code(ESCAPED_6)
+        assert "\n" in code and "\\n" not in code
+        df = pd.DataFrame({"region": ["South", "North", "South"], "quantity": [2, 5, 3]})
+        result = run_code(code, local_vars={"df": df})
+        assert result["error"] is None and "Total quantity sold in South region: 5" in result["stdout"]
+
+    @pytest.mark.parametrize("code", [
+        'print("a\\nb")',                       # backslash-n inside a string literal: valid as written
+        "x = 1\nprint('done')",                  # real line breaks
+        '{"tool": "query_sql", "arguments": {"sql": "SELECT 1\\nFROM t"}}',  # JSON tool call
+        "this is not code \\n at all (",        # still invalid after unescaping: left for self-correction
+    ])
+    def test_everything_else_is_left_alone(self, code):
+        assert _unescape_newlines(code) == code

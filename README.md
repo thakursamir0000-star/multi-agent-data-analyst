@@ -41,10 +41,10 @@ graph TD
 
 | Agent | Role | Temperature |
 |-------|------|-------------|
-| **Planner** | Breaks queries into concrete, pandas-executable sub-tasks | 0.2 |
-| **Coder** | Generates Python code and executes in sandbox | 0.1 |
+| **Planner** | Breaks queries into concrete, self-contained sub-tasks, each stating the question's filters | 0.2 |
+| **Coder** | Generates Python code (or a core tool call) for each sub-task, with the user's question in view | 0.1 |
 | **Analyst** | Turns code outputs into plain-English, data-backed insights | 0.3 |
-| **Critic** | Cross-checks every numerical claim against actual outputs | 0.1 |
+| **Critic** | Checks the answer against the question, the code and its outputs, including that every filter was applied | 0.1 |
 | **HumanInput** | Pauses graph for human clarification when needed | N/A |
 
 ### State Flow
@@ -165,12 +165,14 @@ multi-agent-data-analyst/
 ├── app/
 │   └── main.py                # Streamlit frontend
 ├── evaluation/
-│   ├── benchmark.py           # End-to-end benchmark with pandas ground truth
+│   ├── benchmark.py           # End-to-end benchmark: ground truth, step checks, gate
+│   ├── history.jsonl          # Every recorded benchmark run (trend table)
+│   ├── baseline.json          # Accuracy the regression gate compares against
 │   └── pricing.json           # $/1M tokens per model, for cost per question
 ├── Dockerfile                 # MCP server over HTTP (non-root, remote-safe defaults)
 ├── .github/workflows/ci.yml   # Lint, tests, benchmark
 ├── tests/                     # Unit & integration tests
-├── sample_data/               # Demo dataset + generator
+├── sample_data/               # Sales demo data + held-out support tickets, with generators
 ├── logs/                      # JSONL trace logs (auto-generated)
 ├── requirements.txt
 ├── .env.example
@@ -320,11 +322,33 @@ Each log entry contains:
 
 ## Evaluation
 
-`evaluation/benchmark.py` runs the full graph on 22 questions about `sample_data/sales_sample.csv` whose answers are computed directly in pandas:
-- **15 basic** — totals, rankings, a correlation, a month-level trend, a profit margin, missing values, a top-3;
-- **7 multi-step** — filter + group + compare, e.g. the top region *in 2025*, the average discount on large orders, the category with the highest margin (two categories are 0.2 points apart), the half-year revenue change.
+`evaluation/benchmark.py` runs the full graph on questions whose answers are computed directly in pandas. There are two suites:
+
+- **`sales`, the development set** — 22 questions about `sample_data/sales_sample.csv`. Agent changes are made by studying its failures.
+  - **15 basic:** totals, rankings, a correlation, a month-level trend, a profit margin, missing values, a top-3.
+  - **7 multi-step:** filter + group + compare. Examples: the top region *in 2025*, the average discount on large orders, the category with the highest margin (two categories are 0.2 points apart), the half-year revenue change.
+- **`support`, the held-out set** — 21 questions (8 basic, 13 multi-step) about `sample_data/support_tickets.csv`, a different table of customer-support tickets. It was written before the agent changes and is never used to tune them, so it shows whether an improvement generalizes.
+  - Each filtered question has a different answer from the same question asked of the whole table, so a skipped filter shows up as a miss.
 
 An answer counts as correct when the final insight states the expected number (normal rounding, `%`, `K`/`M` allowed) or every expected name.
+
+**Step checks.** Accuracy alone doesn't say *which agent* went wrong, so for every question that filters rows (a year, a region, a threshold) the benchmark also checks:
+- whether the Planner's sub-tasks mention every condition;
+- whether one code step applies all of them. Each step runs as a separate snippet on the full table, so a filter in one step doesn't carry over to the next.
+
+These checks read the text of the plan and the code, so they are a proxy: a step that mentions a value without filtering on it still passes.
+
+**Failure types.** Every miss gets a type:
+
+| Type | Meaning |
+|---|---|
+| asked for clarification | The question ended in a clarification request instead of an answer |
+| ignored a filter | No step applied the question's filter |
+| wrong time period | The same, when the missing filter is a year |
+| wrong result | Wrong answer, with the filters present |
+| no answer | The pipeline returned an empty answer |
+
+API errors such as rate limits are counted separately and never as misses.
 
 | Metric | Meaning |
 |---|---|
@@ -336,19 +360,42 @@ An answer counts as correct when the final insight states the expected number (n
 | Mean retries | Critic → Coder retries per question |
 | Core-tool share | Steps answered by deterministic tools instead of generated pandas |
 | Latency p50 / p95, tokens and cost per question, cost per correct answer | What an answer costs, from `evaluation/pricing.json` |
+| Filters in the plan / applied in one code step | Step checks over the questions that filter rows |
+| Failure types | Why each miss happened (table above) |
 
 ```bash
-python evaluation/benchmark.py --dry-run                                  # questions + ground truth, no LLM
-python evaluation/benchmark.py                                            # full run, needs GROQ_API_KEY
+python evaluation/benchmark.py --dry-run --suite all                      # questions + ground truth, no LLM
+python evaluation/benchmark.py                                            # sales suite, needs GROQ_API_KEY
+python evaluation/benchmark.py --suite support                            # the held-out suite
+python evaluation/benchmark.py --suite support --label after --resume     # finish an interrupted run
+LLM_PROVIDER=gemini LLM_REQUESTS_PER_MINUTE=10 python evaluation/benchmark.py   # on Gemini's free tier
+LLM_PROVIDER=openrouter python evaluation/benchmark.py --results-dir evaluation/results/openrouter  # paid, one pinned provider
 python evaluation/benchmark.py --level multi_step --repeats 3             # harder questions, 3 runs each
 python evaluation/benchmark.py --models openai/gpt-oss-120b,openai/gpt-oss-20b   # side-by-side comparison
+python evaluation/benchmark.py --label after --gate                       # label the run; fail on a regression
+python evaluation/benchmark.py --history                                  # trend table of recorded runs
 ```
 
-A full run uses a large share of Groq's free daily token allowance for one model, so CI doesn't spend it on every push: start it from **Actions → CI → Run workflow** — pick a model or **compare-all**, and 1–3 runs per question — or let the weekly scheduled run do it; the tables appear in the run summary. Per-minute rate limits are waited out, a daily limit stops a model's run early with a note (the next model has its own quota), and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%. Costs use the list prices in `evaluation/pricing.json`; check them against [groq.com/pricing](https://groq.com/pricing) before quoting. `compare-all` runs `openai/gpt-oss-120b`, `openai/gpt-oss-20b` and `qwen/qwen3.8-27b` (Groq retired the Llama 3 models this list used to include); qwen has no price in the file, so its cost shows as –.
+A full run of one suite uses most of Groq's free daily token allowance for one model, so CI doesn't spend it on every push. Start it from **Actions → CI → Run workflow**: pick a model or **compare-all**, a suite, 1–3 runs per question and an optional label. The weekly scheduled run uses the sales suite. The tables appear in the run summary.
+
+**Interrupted runs and request budgets.**
+- Each finished question is saved to `evaluation/results/progress/` as soon as it completes.
+- `--resume` reuses those answers and runs only the rest. Questions that ended in an API error are run again; finished ones never are.
+- Free tiers count requests as well as tokens, so the report also shows the LLM requests per question and the time spent waiting on rate limits.
+- On OpenRouter it also shows which upstream provider answered each call, as OpenRouter reports it, and the cost OpenRouter billed (reasoning tokens included). `--results-dir` keeps each experiment's files apart.
+- Only finished runs go into the history. A run stopped by a daily limit says so and is finished later with `--resume`.
+
+**Tracking and the regression gate.**
+- Every run appends one line per suite and model to `evaluation/history.jsonl`: date, commit, label, the counts above and the failure types. `--history` prints them as a trend table.
+- In CI, the updated file is part of the run's artifact, and the summary shows the new lines, so they can be added to the repo.
+- `--gate`, which CI always uses, fails the run when accuracy falls more than 0.10 below `evaluation/baseline.json` for that suite and model.
+- The gate also fails when fewer than 90% of the questions could be scored (for example after rate limits), because an incomplete run can't be compared. Per-minute rate limits are retried: each Groq call retries up to `GROQ_API_RETRIES` times (default 6) after Groq's suggested wait, and a question that still fails is retried up to three more times, the later ones after a full minute, because one question can use more tokens than the free tier's 8,000 per minute. Run one evaluation at a time on a shared key. A daily limit stops a model's run early with a note (the next model has its own quota), and errors are reported separately from accuracy — a run in which nothing could be scored fails instead of reporting 0%. Costs use the list prices in `evaluation/pricing.json`; check them against [groq.com/pricing](https://groq.com/pricing) before quoting. `compare-all` runs `openai/gpt-oss-120b`, `openai/gpt-oss-20b` and `qwen/qwen3.8-27b` (Groq retired the Llama 3 models this list used to include); qwen has no price in the file, so its cost shows as –.
 
 ### Results
 
-Two CI runs with `openai/gpt-oss-120b`, one pass over the 22 questions each:
+#### Starting point
+
+Two CI runs with `openai/gpt-oss-120b` on Groq, one pass over the 22 sales questions each:
 
 | Run | Accuracy | Basic | Multi-step | Verified but wrong | Clarification requests | Latency p50 / p95 | Tokens / question | Cost / question |
 |---|---|---|---|---|---|---|---|---|
@@ -360,8 +407,68 @@ The grader at the time scored these runs 14 / 22 and 16 / 22. It marked five ans
 What the misses show:
 - **Basic questions are nearly solved.** The one miss in both runs, #11 *"What was the total revenue in 2024?"*, ended in a clarification request instead of an answer.
 - **Multi-step questions are the weak spot** (3 / 7 and 4 / 7). In #17, #21 and #22, in both runs, the answer was computed over the whole table instead of the filtered rows. #21 is the clearest case: the answer says the data was filtered to the West region, but its 1,461 units for Accessory S is that product's total across *all* regions; in the West, Gadget Z leads with 440. #19, the first half of 2024 versus the first half of 2025, was wrong in one run (the full year 2024 was used) and right in the other.
-- **The Critic approved those wrong answers** (3–4 per run). It checks that the code ran and the answer is clear, but not that the question's filter was applied, so this is the next thing to improve.
+- **The Critic approved those wrong answers** (3–4 per run). It checks that the code ran and the answer is clear, but not that the question's filter was applied.
 - Answers cost about $0.002 each at Groq list prices and take about 30 s (p50), mostly several LLM calls between Planner, Coder and Critic.
+
+**Why the filters were lost, and what changed.** Reading the code behind those misses showed four causes, one per agent:
+
+| Cause | Change |
+|---|---|
+| Each sub-task runs as a separate snippet on the full table, but the Planner often made "filter to the West" a sub-task of its own, so the next sub-task summed every region. | The Planner is told that nothing carries over between sub-tasks: every sub-task states all of the question's conditions, and one sub-task is preferred when it can answer the question. |
+| The Coder saw only its sub-task, never the question. Its tool menu also pushed `group_aggregate`, which always uses every row. | The Coder gets the question (and any clarification from the user). The menu says which tools use every row, and that a subset needs `query_sql` with `WHERE` or code. |
+| The Critic saw the answer and the printed outputs, but not the question or the code, so it couldn't notice a missing filter. | The Critic gets the question, the plan and each step's code or tool call. It must fail an answer whose numbers come from a step that skips one of the question's conditions. It asks for clarification only when the question itself is ambiguous. |
+| When the Critic asked for a retry, its feedback reached only the retry's first sub-task: the Coder cleared it after one step. | The feedback stays for every sub-task of the retry; a new plan clears it. |
+
+#### Before → after, measured
+
+**How it was measured:**
+- **Same model on both sides:** `openai/gpt-oss-120b` through OpenRouter. Every call was pinned to one upstream provider (Prime Intellect) with fallbacks off. All 1,268 answered calls were served by it.
+- **"Before"** ran a copy of this code with the Planner, Coder, Critic and state from before the fixes. Everything else (benchmark, tools, data, provider settings) was identical, checked file by file.
+- **Size:** both suites, 3 runs per question per side, 129 answers per side. There were 0 API errors.
+- **Held-out set:** the `support` suite was written before the fixes and wasn't used to tune them.
+- **Not mixed with the CI runs above:** those used another provider, so their numbers are kept separate.
+- **Strict grading for every number below:** for a "which …" question, the first option the answer names must be the expected one. The earlier grader accepted the expected name anywhere in the answer.
+  - The saved answers were graded again offline with `rescore()`, with no new LLM calls.
+  - This changed 9 grades, all "before" answers going from pass to fail: #111, #113 and #121, each of which named the wrong team or channel first.
+- **Three sets of runs:**
+  - **"Before":** the old agents.
+  - **"After":** the agent fixes.
+  - **"After v2":** the agent fixes, plus the Coder repairing code that comes back with literal `\n` instead of line breaks. It was measured in three fresh runs.
+
+| | Before | After | **After v2** |
+|---|---|---|---|
+| Correct, both suites | 101 / 129 (78.3%) | 121 / 129 (93.8%) | **124 / 129 (96.1%)** |
+| Correct in each run (of 43) | 32, 35, 34 | 40, 40, 41 | **42, 42, 40** |
+| Support (held out) | 43 / 63 | 58 / 63 | **58 / 63** |
+| Sales (development) | 58 / 66 | 63 / 66 | **66 / 66** |
+| Multi-step questions | 33 / 60 (55%) | 53 / 60 (88%) | **55 / 60 (92%)** |
+| Critic approved a wrong answer | 27 | 8 | **5** |
+| LLM calls per question | 5.6 | 4.3 | **4.2** |
+| Tokens per question (input / output) | 5,556 / 631 | 4,034 / 394 | **4,002 / 386** |
+| Latency p50 / p95, support | 11.8 / 30.9 s | 8.6 / 14.7 s | **6.5 / 9.1 s** |
+| Latency p50 / p95, sales | 9.2 / 26.2 s | 6.8 / 10.8 s | **6.2 / 9.1 s** |
+| Billed by OpenRouter | $0.0304 | $0.0217 | **$0.0202** |
+
+**What changed:**
+- **The fixed questions are the split-filter pattern.** Before, the plan filtered in one step (for example, keep Billing tickets from 2024), then ran `describe` or `group_aggregate` over the whole table in the next. After, a single step applies the filter itself: `query_sql` with `WHERE`, or a filtered DataFrame.
+  - #112 and #115 went from 0 / 3 to 3 / 3.
+  - #110 and #119 went from 1 / 3 to 3 / 3.
+- **The Coder repair fixed the remaining sales misses.** The two "after" misses on sales #6 and #21 came from code with literal `\n` that couldn't run. With the repair, sales is 66 / 66.
+- **Cheaper and faster:** compared with "before", "after v2" uses about 25% fewer calls and 29% fewer tokens per question, and its slowest answers (p95) are about three times as fast.
+
+**Statistical tests, "before" → "after v2":**
+- **The percentage gain:** accuracy rose by 17.8 points, from 78.3% to 96.1%.
+- **By question (the conservative test):** 11 questions were right in more of their three runs and 2 in fewer. A two-sided sign test gives **p = 0.022**, so the improvement is significant at the 5% level.
+- **By run:** 25 answers went from wrong to right and 2 from right to wrong, an exact McNemar **p < 0.0001**. This overstates the certainty, because the three runs repeat the same questions.
+- **The Coder repair on its own** (121 → 124) is too small a difference to test.
+
+**Still wrong:**
+- **#121, "Which team resolves Urgent tickets fastest?":** wrong in all three runs. The Planner filters `priority == 'High'` instead of `'Urgent'`. It's a held-out question, so it isn't tuned for.
+- **#109 and #117:** each failed once, in run 3, when their SQL query didn't run.
+
+All OpenRouter runs together (387 answers) cost **US$0.072**.
+
+The regression gate's baseline is unchanged: CI benchmarks `gpt-oss-120b` on Groq, and these runs used another provider. A Gemma 4 31B run on the free Gemini tier was stopped partway through and isn't reported here.
 
 Pick **compare-all** in the workflow to add other models side by side.
 
@@ -383,9 +490,18 @@ The suite needs no API key (LLM calls are mocked). It covers the agents and grap
 
 | Environment Variable | Default | Description |
 |---------------------|---------|-------------|
-| `GROQ_API_KEY` | (required) | Your Groq API key |
+| `LLM_PROVIDER` | `groq` | `groq`, `gemini` or `openrouter` |
+| `GROQ_API_KEY` | (required for Groq) | Your Groq API key |
 | `GROQ_MODEL` | `openai/gpt-oss-120b` | Groq model to use |
+| `GEMINI_API_KEY` | (required for Gemini) | Your Gemini API key |
+| `GEMINI_MODEL` | `gemini-4-hydrogen` | Gemini model to use |
+| `OPENROUTER_API_KEY` | (required for OpenRouter) | Your OpenRouter API key |
+| `OPENROUTER_MODEL` | `openai/gpt-oss-120b` | OpenRouter model to use |
+| `OPENROUTER_PROVIDER` | `primeintellect` | Upstream provider(s) OpenRouter may use, in order |
+| `OPENROUTER_ALLOW_FALLBACKS` | `false` | Let OpenRouter switch to another provider (off for benchmarks: providers serve the model at different precisions) |
 | `MAX_RETRIES` | `2` | Max Critic → Coder retries |
+| `LLM_API_RETRIES` | `6` | Attempts for one LLM call after a rate limit (`GROQ_API_RETRIES` still works) |
+| `LLM_REQUESTS_PER_MINUTE` | `0` (off) | Pace LLM requests below a free tier's per-minute limit |
 | `SANDBOX_TIMEOUT_SECONDS` | `30` | Code execution timeout |
 | `SANDBOX_ISOLATION` | `process` | `process` (separate, killable child) or `thread` (in-process, for development) |
 | `SANDBOX_MAX_MEMORY_MB` | `2048` | Memory limit for sandboxed code (Linux/macOS) |

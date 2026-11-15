@@ -21,8 +21,8 @@ from typing import Any
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_groq import ChatGroq
 
-from agents.llm import core_tools_enabled, count_tokens, get_model, strip_thinking
-from agents.state import NewAttempt
+from agents.llm import chat_model, core_tools_enabled, count_tokens, response_text, strip_thinking
+from agents.state import NewAttempt, question_with_clarification
 from core.datasets import DatasetRegistry
 from core.errors import CoreError
 from core.schemas import ChartResult
@@ -85,6 +85,11 @@ Examples:
 {"tool": "make_chart", "arguments": {"chart_type": "bar", "x": "category",
 "y": "revenue", "agg": "sum", "limit": 5}}
 
+describe, group_aggregate, correlate, detect_anomalies and make_chart always
+use EVERY row of the dataset. When the task needs only some rows (a year or
+date range, one region or category, a threshold), use query_sql with a WHERE
+clause, or write code; an unfiltered tool would answer for the whole table.
+
 Write Python code only when no tool fits: derived columns, date parsing,
 reshaping, multi-step logic or a custom plot.
 """
@@ -103,9 +108,19 @@ def _build_coder_prompt(
     critic_feedback: str = "",
     previous_error: str = "",
     tools: bool = False,
+    question: str = "",
 ) -> str:
     """Build the human message for the coder."""
     parts = [f"## Dataset Profile\n{profile_text}\n"]
+
+    if question:
+        # The task is one step of the plan; the question carries its conditions.
+        parts.append(
+            f"## User Question\n{question}\n\n"
+            "The task below is one step towards answering this question. `df` (and the "
+            "SQL table) always hold the FULL dataset: apply every condition the question "
+            "sets (time period, region/category/product, thresholds) to the rows you use.\n"
+        )
 
     if critic_feedback:
         parts.append(f"## Critic Feedback (fix this)\n{critic_feedback}\n")
@@ -138,9 +153,33 @@ def _extract_code(response_text: str) -> str:
             if in_block:
                 code_lines.append(line)
         if code_lines:
-            return "\n".join(code_lines).strip()
+            return _unescape_newlines("\n".join(code_lines).strip())
 
-    return text.strip()
+    return _unescape_newlines(text.strip())
+
+
+def _unescape_newlines(code: str) -> str:
+    """Repair code whose line breaks came back as literal "\\n" sequences.
+
+    Some providers occasionally return the whole snippet on one line with
+    escaped newlines, which can't run. Only when the text has no real line
+    break, doesn't compile as written and does compile once unescaped is it
+    changed, so ordinary code (including "\\n" inside string literals) and
+    JSON tool calls are left alone.
+    """
+    if "\n" in code or "\\n" not in code or code.lstrip().startswith("{"):
+        return code
+    try:
+        compile(code, "<llm code>", "exec")
+        return code
+    except SyntaxError:
+        pass
+    repaired = code.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t")
+    try:
+        compile(repaired, "<llm code>", "exec")
+    except SyntaxError:
+        return code
+    return repaired
 
 
 def _system_prompt(core: tuple[DatasetRegistry, str] | None) -> str:
@@ -247,12 +286,13 @@ def coder_node(
         When both are given (and ENABLE_CORE_TOOLS is not false), the LLM
         may answer with a deterministic core tool call instead of code.
     """
-    llm = ChatGroq(model=get_model(), temperature=0.1)
+    llm = chat_model(ChatGroq, temperature=0.1)
 
     sub_tasks = state.get("sub_tasks", [])
     task_idx = state.get("current_task_index", 0)
     profile_text = state.get("dataframe_profile", "")
     critic_feedback = state.get("critic_feedback", "")
+    question = question_with_clarification(state)
 
     if task_idx >= len(sub_tasks):
         return {"current_task_index": task_idx}
@@ -271,6 +311,7 @@ def coder_node(
         profile_text=profile_text,
         critic_feedback=critic_feedback,
         tools=core is not None,
+        question=question,
     )
 
     messages = [
@@ -280,7 +321,7 @@ def coder_node(
 
     response = llm.invoke(messages)
     llm_responses = [response]
-    code = _extract_code(response.content)
+    code = _extract_code(response_text(response))
 
     # Execute: a core tool call, or code in the sandbox
     local_vars = {"df": df} if df is not None else {}
@@ -293,6 +334,7 @@ def coder_node(
             profile_text=profile_text,
             previous_error=exec_result["error"],
             tools=core is not None,
+            question=question,
         )
         retry_messages = [
             SystemMessage(content=system_prompt),
@@ -300,7 +342,7 @@ def coder_node(
         ]
         retry_response = llm.invoke(retry_messages)
         llm_responses.append(retry_response)
-        code = _extract_code(retry_response.content)
+        code = _extract_code(response_text(retry_response))
         exec_result, tool = _execute(code, local_vars, core)
         response = retry_response  # Use the corrected response for messages
 
@@ -320,7 +362,8 @@ def coder_node(
         # previous attempt's outputs instead of appending to them
         "code_outputs": NewAttempt([output_record]) if task_idx == 0 else [output_record],
         "current_task_index": task_idx + 1,
-        "critic_feedback": "",  # Clear critic feedback after processing
+        # critic_feedback is kept: on a Critic retry every task of the new
+        # attempt needs it, not just the first (the Planner clears it).
         "messages": [response],
         # Both the initial attempt and any self-correction retry
         TOKEN_USAGE_KEY: count_tokens(*llm_responses),

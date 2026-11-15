@@ -7,7 +7,7 @@ Every node reads from and writes to this state object.
 
 from __future__ import annotations
 
-from typing import TypedDict, Annotated
+from typing import Annotated, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -25,6 +25,18 @@ class NewAttempt(list):
     attempt (a new plan, or a Critic retry) only holds its own results. It
     is still a plain list of records for anything that reads node updates.
     """
+
+
+def question_with_clarification(state: dict) -> str:
+    """The user's question, plus their answer if they were asked to clarify it.
+
+    Planner, Coder and Critic all work from this text, so a clarification
+    reaches every agent, not only the re-plan.
+    """
+    question = state.get("user_query", "")
+    if state.get("human_answer"):
+        question += f"\n\n[Clarification from user]: {state['human_answer']}"
+    return question
 
 
 def _append_or_new_attempt(existing: list, new: list) -> list:

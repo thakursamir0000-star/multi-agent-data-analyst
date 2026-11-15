@@ -405,14 +405,20 @@ def _resume_with_human_input(answer: str) -> None:
 def main():
     """Main Streamlit application."""
 
-    # Check API key is configured
-    api_key = get_env("GROQ_API_KEY")
-    if not api_key:
+    # Check the active provider's API key is configured (LLM_PROVIDER: groq or gemini)
+    from agents.llm import api_key_name
+
+    key_name = api_key_name()
+    if not get_env(key_name):
+        example = (
+            "GROQ_API_KEY = \"gsk_your_key_here\"\nGROQ_MODEL = \"openai/gpt-oss-120b\"\n"
+            if key_name == "GROQ_API_KEY"
+            else "LLM_PROVIDER = \"gemini\"\nGEMINI_API_KEY = \"your_gemini_key\"\n"
+        )
         st.error(
-            "**GROQ_API_KEY is not configured.**\n\n"
+            f"**{key_name} is not configured.**\n\n"
             "Go to your Streamlit Cloud app → Settings → Secrets and add:\n"
-            "```toml\nGROQ_API_KEY = \"gsk_your_key_here\"\n"
-            "GROQ_MODEL = \"openai/gpt-oss-120b\"\n```"
+            f"```toml\n{example}```"
         )
         return
 

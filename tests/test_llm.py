@@ -49,14 +49,20 @@ class TestStripThinking:
 
 @pytest.fixture
 def reset_llm_cache():
-    """Clear the module-level caches before and after each test."""
+    """Clear the module-level caches before and after each test (provider: Groq)."""
+    llm._PROVIDER = "groq"
     llm._MODEL = None
     llm._MAX_RETRIES = None
+    llm._API_RETRIES = None
     llm._CORE_TOOLS = None
+    llm._REQUESTS_PER_MINUTE = None
     yield
+    llm._PROVIDER = None
     llm._MODEL = None
     llm._MAX_RETRIES = None
+    llm._API_RETRIES = None
     llm._CORE_TOOLS = None
+    llm._REQUESTS_PER_MINUTE = None
 
 
 class TestConfigReaders:
@@ -73,6 +79,15 @@ class TestConfigReaders:
     def test_get_max_retries_is_int(self, reset_llm_cache):
         with patch("agents.llm.get_env", return_value="3"):
             assert llm.get_max_retries() == 3
+
+    def test_groq_calls_retry_six_times_by_default(self, reset_llm_cache):
+        # The client's default of 2 retries failed whole questions on the free
+        # tier (8k tokens per minute, ~8-11k tokens per question).
+        with patch("agents.llm.get_env", side_effect=lambda key, default="": default):
+            assert llm.get_api_retries() == 6
+        llm._API_RETRIES = None
+        with patch("agents.llm.get_env", return_value="9"):
+            assert llm.get_api_retries() == 9
 
     def test_core_tools_enabled_by_default(self, reset_llm_cache):
         with patch("agents.llm.get_env", side_effect=lambda key, default="": default) as mock_env:

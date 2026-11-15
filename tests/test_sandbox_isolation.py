@@ -35,8 +35,9 @@ def test_runaway_code_is_stopped_on_time(monkeypatch):
 def test_child_environment_has_no_secrets(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "gsk_should_not_leak")
     monkeypatch.setenv("LANGSMITH_API_KEY", "ls_should_not_leak")
+    monkeypatch.setenv("GEMINI_API_KEY", "gemini_should_not_leak")
     env = sandbox._child_env("/tmp/work")
-    assert "GROQ_API_KEY" not in env and "LANGSMITH_API_KEY" not in env
+    assert "GROQ_API_KEY" not in env and "LANGSMITH_API_KEY" not in env and "GEMINI_API_KEY" not in env
     assert set(env) <= set(sandbox._ENV_ALLOWLIST) | {
         "MPLBACKEND", "MPLCONFIGDIR", "PYTHONIOENCODING",
         "OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",

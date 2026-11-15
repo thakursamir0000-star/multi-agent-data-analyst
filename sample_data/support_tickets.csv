@@ -1,0 +1,601 @@
+ticket_id,created,channel,team,priority,first_response_min,resolution_hours,reopened,satisfaction
+T0001,2024-05-01,Email,Shipping,Medium,82,70.0,No,2
+T0002,2025-03-27,Email,Accounts,Low,278,52.4,No,3
+T0003,2024-12-22,Web Form,Shipping,High,108,8.9,No,
+T0004,2025-01-12,Chat,Billing,Medium,11,27.1,No,3
+T0005,2025-06-21,Email,Billing,Urgent,33,5.2,No,4
+T0006,2024-05-04,Chat,Billing,Medium,31,25.6,No,3
+T0007,2025-02-15,Chat,Technical,Low,25,65.3,No,3
+T0008,2025-04-22,Chat,Shipping,High,40,26.3,No,4
+T0009,2025-06-11,Email,Shipping,Low,192,34.8,Yes,1
+T0010,2024-01-15,Email,Billing,Medium,69,49.0,Yes,1
+T0011,2024-12-31,Email,Technical,Medium,61,35.5,No,4
+T0012,2024-06-12,Web Form,Accounts,Urgent,192,3.6,No,5
+T0013,2025-02-02,Web Form,Technical,Medium,36,21.1,No,5
+T0014,2024-05-04,Chat,Billing,Medium,11,11.7,No,5
+T0015,2024-03-12,Chat,Technical,Medium,70,16.4,No,5
+T0016,2025-06-26,Email,Shipping,High,63,6.2,No,5
+T0017,2024-07-10,Email,Technical,Medium,94,54.9,No,3
+T0018,2025-06-21,Phone,Accounts,High,15,28.0,No,4
+T0019,2024-12-26,Phone,Billing,High,29,17.3,No,5
+T0020,2024-10-01,Phone,Technical,High,11,10.6,No,5
+T0021,2024-10-10,Chat,Technical,Urgent,42,5.7,No,5
+T0022,2024-01-24,Email,Technical,Medium,156,27.2,Yes,1
+T0023,2024-08-08,Chat,Billing,Medium,25,13.9,No,5
+T0024,2024-12-30,Email,Accounts,High,273,8.5,No,5
+T0025,2024-11-22,Chat,Technical,Urgent,49,8.8,No,5
+T0026,2025-01-28,Chat,Accounts,Medium,26,27.8,No,4
+T0027,2024-01-17,Email,Billing,Low,116,59.4,No,3
+T0028,2025-06-16,Phone,Technical,Medium,93,15.6,No,4
+T0029,2025-01-03,Web Form,Technical,High,66,16.6,No,4
+T0030,2024-11-15,Email,Accounts,Low,116,74.7,No,2
+T0031,2024-04-13,Web Form,Technical,Low,534,114.6,No,1
+T0032,2024-04-17,Email,Accounts,Medium,60,30.2,No,4
+T0033,2025-02-01,Email,Accounts,Low,65,38.1,No,4
+T0034,2024-01-31,Email,Billing,Low,299,71.4,Yes,1
+T0035,2024-11-05,Email,Technical,Medium,145,32.8,No,4
+T0036,2025-05-25,Email,Billing,High,109,16.8,No,5
+T0037,2024-11-15,Email,Accounts,Low,16,28.0,No,3
+T0038,2024-06-29,Email,Billing,High,111,5.9,No,5
+T0039,2024-12-02,Phone,Technical,High,29,18.5,No,5
+T0040,2025-04-14,Chat,Billing,Medium,24,18.3,No,5
+T0041,2024-12-04,Email,Billing,Low,40,18.4,No,4
+T0042,2025-05-09,Email,Technical,Low,53,35.4,Yes,2
+T0043,2024-01-12,Web Form,Technical,Urgent,182,13.6,Yes,2
+T0044,2024-05-16,Email,Technical,Medium,342,13.2,No,5
+T0045,2025-05-06,Email,Shipping,High,35,7.1,No,5
+T0046,2025-02-13,Email,Billing,High,134,39.2,No,4
+T0047,2024-04-02,Web Form,Shipping,Medium,85,27.8,No,4
+T0048,2025-06-24,Chat,Billing,Low,23,40.6,No,4
+T0049,2024-10-04,Phone,Accounts,Low,16,93.2,No,2
+T0050,2024-06-05,Phone,Technical,High,29,22.6,No,5
+T0051,2024-12-31,Email,Technical,High,78,38.4,No,4
+T0052,2025-06-10,Chat,Billing,Medium,13,30.1,Yes,
+T0053,2024-12-27,Chat,Accounts,High,15,4.8,No,4
+T0054,2024-07-23,Phone,Technical,Low,85,49.9,No,2
+T0055,2025-05-08,Email,Shipping,High,65,25.1,No,4
+T0056,2025-03-14,Email,Shipping,Medium,98,21.5,No,5
+T0057,2025-04-11,Chat,Accounts,Low,10,47.1,No,4
+T0058,2024-10-30,Email,Billing,Low,71,82.7,No,1
+T0059,2024-01-23,Email,Technical,Low,171,50.1,No,3
+T0060,2024-11-10,Web Form,Technical,High,81,18.9,No,5
+T0061,2024-04-26,Chat,Billing,Medium,23,21.1,No,5
+T0062,2025-03-18,Web Form,Billing,Medium,106,34.2,No,4
+T0063,2025-04-13,Chat,Technical,Low,7,112.9,No,1
+T0064,2024-06-20,Web Form,Technical,High,48,29.0,No,4
+T0065,2025-04-23,Phone,Billing,Urgent,27,2.0,No,5
+T0066,2024-06-20,Chat,Billing,Medium,17,23.3,No,
+T0067,2025-02-27,Chat,Technical,Medium,27,25.4,No,4
+T0068,2024-06-21,Chat,Technical,Low,5,63.1,No,3
+T0069,2024-11-26,Email,Billing,Low,172,48.4,No,3
+T0070,2024-12-30,Email,Accounts,Low,125,25.2,No,4
+T0071,2025-06-28,Email,Technical,Urgent,28,5.0,No,5
+T0072,2025-05-29,Web Form,Billing,Low,125,67.0,Yes,1
+T0073,2025-03-30,Phone,Shipping,Urgent,46,6.0,No,4
+T0074,2024-11-16,Phone,Technical,Medium,36,46.5,Yes,2
+T0075,2025-02-08,Email,Billing,Urgent,93,5.7,No,5
+T0076,2025-03-16,Phone,Technical,Urgent,38,12.1,No,5
+T0077,2025-02-27,Email,Accounts,High,240,11.7,No,5
+T0078,2025-06-22,Email,Billing,Medium,109,75.0,No,2
+T0079,2024-08-08,Email,Accounts,Medium,71,33.5,No,4
+T0080,2024-11-24,Email,Technical,High,92,37.9,No,4
+T0081,2025-05-12,Email,Technical,Low,259,37.3,No,4
+T0082,2025-04-19,Chat,Shipping,Medium,20,14.0,Yes,3
+T0083,2024-12-24,Web Form,Technical,Low,164,63.9,Yes,1
+T0084,2024-03-18,Chat,Accounts,Medium,11,24.1,No,4
+T0085,2024-09-16,Email,Accounts,Medium,160,10.5,No,4
+T0086,2025-06-13,Email,Technical,Low,209,29.5,No,4
+T0087,2025-02-19,Chat,Accounts,Medium,18,31.1,Yes,2
+T0088,2024-12-25,Phone,Accounts,Low,26,29.6,Yes,2
+T0089,2025-01-28,Email,Shipping,High,278,9.9,No,5
+T0090,2024-04-20,Web Form,Technical,High,365,9.6,No,5
+T0091,2025-01-14,Chat,Shipping,Medium,9,53.8,No,3
+T0092,2024-02-19,Email,Shipping,Medium,136,27.2,No,4
+T0093,2025-04-18,Chat,Technical,Medium,23,75.3,No,2
+T0094,2024-01-11,Chat,Accounts,Low,9,22.2,No,5
+T0095,2025-04-20,Chat,Accounts,High,18,7.9,No,4
+T0096,2024-07-11,Phone,Shipping,Medium,29,68.1,No,3
+T0097,2024-12-19,Phone,Technical,Low,18,63.1,No,3
+T0098,2024-05-06,Email,Accounts,Medium,58,20.3,No,
+T0099,2024-11-18,Email,Accounts,Medium,110,52.0,Yes,1
+T0100,2025-05-15,Phone,Technical,Medium,67,54.4,No,2
+T0101,2024-03-23,Chat,Shipping,High,19,6.5,No,5
+T0102,2024-12-30,Web Form,Technical,Low,251,41.6,No,
+T0103,2025-06-24,Chat,Technical,Urgent,6,4.4,No,4
+T0104,2024-07-24,Email,Billing,Medium,152,13.7,No,5
+T0105,2024-09-01,Phone,Accounts,High,15,9.5,Yes,3
+T0106,2024-08-18,Web Form,Accounts,Medium,367,10.2,No,5
+T0107,2024-10-09,Phone,Accounts,Medium,55,63.1,No,2
+T0108,2024-10-13,Email,Technical,High,111,14.2,No,
+T0109,2024-10-17,Web Form,Billing,Low,106,34.9,No,4
+T0110,2024-09-29,Chat,Technical,Urgent,26,10.0,No,
+T0111,2024-01-17,Web Form,Technical,Medium,120,72.2,No,2
+T0112,2024-02-03,Email,Technical,Urgent,124,7.9,No,4
+T0113,2024-04-17,Email,Technical,Low,51,67.8,No,3
+T0114,2024-11-12,Email,Technical,Medium,44,19.5,No,5
+T0115,2024-05-21,Chat,Technical,High,48,57.8,Yes,1
+T0116,2024-06-26,Chat,Accounts,Low,23,47.7,No,4
+T0117,2024-05-05,Chat,Shipping,Low,81,79.0,No,2
+T0118,2025-04-27,Phone,Technical,Medium,18,27.6,No,4
+T0119,2024-11-20,Chat,Technical,Medium,44,22.6,No,5
+T0120,2025-02-20,Chat,Technical,High,33,10.8,No,5
+T0121,2024-05-19,Chat,Billing,Urgent,9,6.5,No,
+T0122,2024-05-05,Email,Billing,Medium,134,33.5,No,3
+T0123,2025-03-23,Phone,Technical,Medium,12,41.3,No,4
+T0124,2025-02-16,Chat,Technical,Low,23,108.4,Yes,1
+T0125,2025-02-06,Chat,Technical,Low,20,35.5,No,4
+T0126,2025-01-05,Email,Accounts,Urgent,207,9.1,No,5
+T0127,2024-10-03,Email,Accounts,Low,123,25.7,No,4
+T0128,2024-11-28,Email,Technical,Low,114,27.7,No,4
+T0129,2024-01-19,Web Form,Technical,Low,55,57.7,No,3
+T0130,2024-05-13,Email,Shipping,High,106,18.9,Yes,3
+T0131,2024-06-24,Email,Billing,High,50,10.2,No,5
+T0132,2024-06-09,Chat,Shipping,Medium,30,28.3,Yes,1
+T0133,2024-08-21,Chat,Technical,Medium,26,29.4,No,4
+T0134,2025-06-05,Chat,Accounts,Medium,24,11.1,No,4
+T0135,2024-10-20,Chat,Billing,High,15,7.5,No,5
+T0136,2025-02-02,Web Form,Shipping,Medium,87,22.6,No,5
+T0137,2025-06-20,Email,Accounts,High,45,12.1,No,4
+T0138,2024-12-06,Email,Shipping,High,121,15.4,No,5
+T0139,2025-06-05,Phone,Technical,Low,48,50.6,No,3
+T0140,2025-06-17,Email,Technical,Medium,356,13.0,No,5
+T0141,2025-04-23,Phone,Technical,Urgent,28,7.4,No,4
+T0142,2024-06-11,Email,Technical,Medium,74,49.8,No,2
+T0143,2024-12-25,Web Form,Technical,Urgent,72,11.6,No,4
+T0144,2024-06-09,Web Form,Technical,High,139,14.6,No,4
+T0145,2024-01-29,Web Form,Accounts,Medium,112,30.0,No,4
+T0146,2024-11-24,Chat,Billing,Medium,19,23.0,No,5
+T0147,2024-09-21,Email,Shipping,Low,155,27.8,No,3
+T0148,2025-06-29,Email,Accounts,Urgent,247,6.3,No,5
+T0149,2024-08-31,Email,Accounts,Medium,138,10.8,No,5
+T0150,2025-03-07,Email,Shipping,Low,177,74.7,No,1
+T0151,2024-04-14,Web Form,Shipping,Medium,176,41.8,Yes,2
+T0152,2024-02-09,Web Form,Accounts,High,356,12.2,No,5
+T0153,2024-03-18,Phone,Technical,Medium,45,19.1,No,5
+T0154,2024-11-30,Web Form,Technical,Low,54,56.6,Yes,1
+T0155,2025-06-18,Web Form,Shipping,High,63,40.2,No,3
+T0156,2025-06-17,Phone,Billing,Low,12,19.4,No,5
+T0157,2024-10-20,Email,Accounts,Medium,77,21.6,Yes,3
+T0158,2024-08-15,Phone,Billing,Medium,60,22.0,No,5
+T0159,2024-11-11,Phone,Shipping,Low,42,48.5,No,
+T0160,2025-03-12,Chat,Technical,Urgent,70,5.3,No,5
+T0161,2024-04-23,Chat,Accounts,Urgent,11,3.8,No,5
+T0162,2025-02-13,Email,Technical,Low,69,58.7,No,2
+T0163,2025-05-12,Chat,Billing,Medium,18,27.1,No,3
+T0164,2024-12-19,Email,Technical,Medium,211,50.7,Yes,1
+T0165,2025-05-20,Chat,Technical,Medium,50,10.9,No,5
+T0166,2024-07-23,Chat,Technical,High,40,12.8,Yes,3
+T0167,2025-05-18,Chat,Shipping,High,26,19.9,No,4
+T0168,2024-07-02,Web Form,Technical,High,43,20.2,No,5
+T0169,2024-10-08,Email,Shipping,Low,101,50.0,No,3
+T0170,2024-11-10,Web Form,Technical,Low,217,17.3,No,5
+T0171,2024-10-04,Email,Shipping,Low,102,61.3,No,3
+T0172,2024-11-03,Phone,Technical,Medium,13,71.1,No,3
+T0173,2024-10-16,Web Form,Shipping,Low,117,39.0,Yes,
+T0174,2024-11-01,Chat,Billing,High,26,29.9,No,4
+T0175,2024-03-17,Email,Accounts,Low,142,52.1,Yes,1
+T0176,2025-06-07,Email,Technical,High,80,29.6,No,4
+T0177,2024-09-30,Chat,Billing,Low,27,31.6,No,4
+T0178,2025-05-29,Phone,Technical,High,10,9.5,No,4
+T0179,2024-08-26,Web Form,Technical,High,49,27.9,Yes,2
+T0180,2025-01-04,Chat,Technical,Medium,11,44.4,Yes,2
+T0181,2024-05-26,Web Form,Billing,Low,28,35.2,No,4
+T0182,2025-04-29,Chat,Technical,Low,22,136.6,No,1
+T0183,2025-05-27,Email,Technical,Medium,59,20.9,No,5
+T0184,2024-08-19,Chat,Billing,Low,30,43.3,No,4
+T0185,2024-06-02,Web Form,Billing,Medium,242,22.8,No,
+T0186,2024-03-30,Chat,Billing,Medium,27,66.7,No,3
+T0187,2025-04-02,Chat,Accounts,Low,21,18.6,No,4
+T0188,2024-11-07,Web Form,Shipping,Medium,83,46.9,No,4
+T0189,2025-04-10,Phone,Accounts,Low,165,26.0,No,4
+T0190,2024-09-10,Web Form,Technical,High,64,14.8,No,5
+T0191,2024-08-26,Chat,Accounts,High,11,15.5,No,5
+T0192,2024-07-07,Web Form,Technical,Low,112,100.1,Yes,1
+T0193,2025-05-07,Email,Billing,High,84,18.3,Yes,3
+T0194,2025-05-23,Phone,Billing,Medium,17,42.8,No,4
+T0195,2024-02-11,Email,Technical,Low,227,87.6,No,1
+T0196,2025-03-13,Chat,Billing,Medium,24,60.2,No,3
+T0197,2024-10-12,Web Form,Technical,High,191,7.4,No,4
+T0198,2025-01-19,Web Form,Technical,Medium,151,28.7,No,4
+T0199,2024-06-13,Chat,Shipping,Medium,6,25.2,No,4
+T0200,2024-06-01,Email,Technical,Medium,105,26.8,No,4
+T0201,2024-02-17,Email,Technical,High,57,18.2,No,5
+T0202,2025-05-14,Phone,Billing,Medium,26,20.8,No,5
+T0203,2025-06-01,Phone,Technical,High,29,29.2,No,4
+T0204,2024-05-10,Email,Shipping,Medium,271,20.3,No,5
+T0205,2024-10-20,Email,Technical,Medium,111,55.6,No,2
+T0206,2024-04-12,Phone,Shipping,Urgent,15,6.6,No,
+T0207,2024-02-14,Email,Accounts,Medium,52,38.0,No,3
+T0208,2024-02-07,Phone,Technical,Low,14,37.9,No,3
+T0209,2025-05-26,Email,Shipping,Medium,33,17.1,No,5
+T0210,2024-03-10,Chat,Billing,Low,14,51.0,No,
+T0211,2024-04-03,Web Form,Technical,Urgent,266,4.5,No,5
+T0212,2024-05-14,Email,Shipping,Medium,90,20.5,No,5
+T0213,2024-09-13,Chat,Technical,Medium,55,22.7,No,
+T0214,2024-06-21,Phone,Technical,Medium,32,36.9,No,4
+T0215,2024-05-22,Chat,Technical,Urgent,41,5.6,No,5
+T0216,2025-04-28,Email,Technical,High,138,32.7,No,3
+T0217,2024-11-28,Email,Billing,Medium,198,16.5,No,4
+T0218,2024-05-23,Chat,Technical,Low,14,53.9,Yes,1
+T0219,2025-02-07,Chat,Technical,Medium,18,51.9,No,3
+T0220,2024-07-12,Email,Technical,Medium,197,61.2,No,3
+T0221,2024-03-06,Web Form,Shipping,Medium,58,28.3,No,
+T0222,2024-10-26,Phone,Accounts,Low,25,39.1,No,4
+T0223,2024-02-02,Email,Technical,Medium,86,32.6,Yes,2
+T0224,2025-04-16,Chat,Technical,Low,20,85.0,No,
+T0225,2024-04-08,Email,Shipping,Medium,27,17.9,No,
+T0226,2025-04-08,Email,Billing,High,63,8.4,No,5
+T0227,2024-05-24,Chat,Technical,Low,29,40.2,No,
+T0228,2024-04-28,Chat,Accounts,Medium,15,7.6,No,4
+T0229,2025-03-02,Phone,Accounts,Medium,27,18.2,No,5
+T0230,2024-02-11,Chat,Billing,Urgent,22,7.0,No,5
+T0231,2024-02-02,Phone,Billing,Low,27,24.4,No,3
+T0232,2024-02-13,Chat,Billing,Urgent,19,2.1,No,5
+T0233,2025-02-17,Email,Accounts,Low,155,22.2,No,5
+T0234,2024-01-28,Chat,Technical,High,41,26.3,No,3
+T0235,2025-02-25,Chat,Shipping,High,29,19.8,No,
+T0236,2024-05-28,Chat,Shipping,High,33,9.3,No,4
+T0237,2025-06-15,Chat,Billing,Low,86,80.1,Yes,1
+T0238,2024-12-10,Phone,Billing,Low,15,72.7,No,2
+T0239,2024-06-12,Email,Shipping,High,126,20.3,No,5
+T0240,2024-03-19,Web Form,Shipping,Low,59,55.5,No,3
+T0241,2024-05-20,Phone,Technical,Low,14,69.7,Yes,1
+T0242,2024-03-12,Chat,Shipping,Low,7,24.1,Yes,1
+T0243,2024-04-02,Email,Technical,Medium,131,10.7,No,5
+T0244,2025-01-26,Email,Technical,Medium,107,11.9,No,4
+T0245,2024-05-27,Email,Accounts,Medium,50,7.3,No,4
+T0246,2024-11-18,Phone,Shipping,Urgent,26,8.8,No,4
+T0247,2025-04-11,Phone,Billing,Low,27,33.5,No,3
+T0248,2025-06-24,Email,Billing,High,89,14.6,No,5
+T0249,2024-05-31,Web Form,Technical,Low,110,49.9,No,3
+T0250,2024-01-13,Email,Technical,High,86,38.2,No,3
+T0251,2025-04-09,Phone,Billing,Low,10,37.0,No,4
+T0252,2024-01-08,Email,Technical,Low,47,50.3,No,3
+T0253,2024-10-15,Email,Technical,Medium,191,35.5,No,3
+T0254,2024-09-21,Chat,Accounts,Low,30,52.6,No,3
+T0255,2025-03-11,Web Form,Shipping,Medium,92,22.6,No,4
+T0256,2024-04-04,Email,Accounts,Low,203,8.7,No,4
+T0257,2024-12-19,Chat,Accounts,Medium,15,12.8,No,5
+T0258,2025-02-19,Phone,Billing,Low,6,66.0,Yes,1
+T0259,2025-06-18,Web Form,Accounts,Medium,99,20.6,No,5
+T0260,2024-06-26,Chat,Technical,Low,50,68.6,No,2
+T0261,2024-08-28,Phone,Billing,Low,42,35.0,Yes,2
+T0262,2024-12-12,Web Form,Billing,Medium,99,11.4,No,5
+T0263,2024-12-30,Chat,Shipping,High,21,15.2,No,5
+T0264,2024-12-19,Email,Shipping,Low,81,151.5,No,1
+T0265,2024-06-21,Chat,Accounts,Medium,23,8.3,No,5
+T0266,2025-05-17,Chat,Accounts,Urgent,20,3.4,No,5
+T0267,2025-05-16,Chat,Billing,Medium,24,33.2,No,4
+T0268,2024-11-26,Email,Accounts,Medium,119,51.4,No,3
+T0269,2025-03-06,Email,Technical,Low,81,75.0,No,2
+T0270,2024-11-04,Chat,Technical,Medium,35,16.5,No,5
+T0271,2024-07-11,Web Form,Billing,Low,116,55.7,Yes,1
+T0272,2025-05-28,Chat,Shipping,Low,41,44.1,No,3
+T0273,2024-08-04,Email,Shipping,High,136,12.7,No,5
+T0274,2024-02-15,Phone,Technical,Low,39,29.1,No,4
+T0275,2025-03-20,Email,Accounts,High,54,7.0,No,5
+T0276,2025-02-06,Email,Billing,Medium,94,16.6,Yes,3
+T0277,2024-10-17,Chat,Shipping,Medium,31,15.4,No,4
+T0278,2025-03-27,Web Form,Billing,Low,128,50.1,Yes,1
+T0279,2024-03-06,Email,Technical,Low,255,179.6,No,1
+T0280,2025-03-21,Email,Shipping,Low,162,67.8,No,3
+T0281,2025-01-24,Email,Shipping,Medium,30,41.6,Yes,2
+T0282,2024-09-03,Email,Technical,Low,597,53.0,No,3
+T0283,2025-02-18,Chat,Billing,Medium,39,22.4,No,4
+T0284,2024-09-25,Email,Billing,Medium,68,14.4,No,4
+T0285,2024-08-26,Email,Shipping,Medium,23,19.3,No,5
+T0286,2025-03-07,Email,Billing,Medium,61,21.4,No,5
+T0287,2024-09-24,Chat,Shipping,High,53,27.2,No,
+T0288,2025-04-28,Email,Technical,Urgent,91,2.8,No,5
+T0289,2024-03-15,Phone,Accounts,Medium,10,18.8,No,5
+T0290,2025-02-27,Phone,Accounts,Low,15,26.2,No,4
+T0291,2024-11-17,Phone,Billing,Medium,86,33.8,No,4
+T0292,2025-06-14,Chat,Billing,Low,26,25.1,No,4
+T0293,2024-04-27,Email,Accounts,Low,92,24.2,No,4
+T0294,2025-04-29,Phone,Accounts,Medium,49,15.5,Yes,3
+T0295,2024-01-06,Web Form,Billing,Medium,327,51.5,Yes,1
+T0296,2024-08-18,Email,Shipping,Medium,94,35.4,No,4
+T0297,2024-11-23,Phone,Technical,Medium,5,40.2,No,4
+T0298,2024-05-18,Chat,Technical,Medium,42,49.3,No,2
+T0299,2024-09-10,Chat,Billing,Low,37,102.5,Yes,
+T0300,2024-06-06,Chat,Billing,Urgent,15,4.0,No,5
+T0301,2024-07-13,Chat,Billing,Medium,39,22.1,No,5
+T0302,2024-10-25,Phone,Accounts,Medium,13,61.4,Yes,1
+T0303,2024-05-12,Email,Billing,Medium,72,22.9,Yes,3
+T0304,2024-03-23,Email,Technical,Low,153,84.4,No,2
+T0305,2025-02-01,Phone,Technical,Medium,17,126.6,No,1
+T0306,2025-04-24,Chat,Billing,Medium,14,41.6,No,4
+T0307,2024-07-29,Email,Shipping,Medium,67,23.9,No,5
+T0308,2024-12-18,Phone,Billing,High,20,10.7,No,4
+T0309,2024-09-25,Email,Technical,Medium,78,50.7,No,2
+T0310,2024-04-03,Email,Billing,Low,35,94.8,No,1
+T0311,2024-02-07,Phone,Technical,Medium,40,23.3,No,5
+T0312,2024-08-08,Phone,Technical,High,48,8.0,No,5
+T0313,2025-03-26,Web Form,Accounts,Medium,222,34.2,Yes,2
+T0314,2025-03-21,Email,Technical,Low,114,47.8,No,3
+T0315,2024-12-21,Email,Technical,Medium,259,35.3,No,4
+T0316,2025-03-05,Chat,Technical,Medium,12,38.1,No,4
+T0317,2025-05-30,Chat,Accounts,High,17,9.5,No,5
+T0318,2024-02-17,Email,Technical,Medium,89,36.1,No,4
+T0319,2024-10-28,Chat,Technical,High,11,12.6,No,4
+T0320,2024-03-09,Web Form,Shipping,High,71,22.8,No,4
+T0321,2025-01-28,Email,Accounts,Low,113,18.5,No,5
+T0322,2024-04-25,Chat,Accounts,Low,10,16.3,No,5
+T0323,2025-01-18,Phone,Technical,Medium,21,23.9,No,4
+T0324,2024-07-22,Email,Technical,Medium,81,87.3,No,2
+T0325,2024-11-22,Phone,Technical,Medium,11,27.7,Yes,2
+T0326,2024-10-15,Web Form,Billing,Medium,58,20.8,Yes,2
+T0327,2025-06-10,Email,Billing,High,126,8.0,No,5
+T0328,2025-03-07,Chat,Shipping,Urgent,19,3.1,No,5
+T0329,2024-07-26,Phone,Shipping,Medium,8,21.9,No,
+T0330,2025-05-11,Email,Technical,Medium,259,45.3,No,4
+T0331,2025-01-25,Email,Shipping,Urgent,108,3.1,No,5
+T0332,2024-06-22,Chat,Technical,Medium,29,97.8,No,1
+T0333,2024-12-28,Chat,Technical,High,44,9.8,No,5
+T0334,2025-03-22,Phone,Technical,Low,25,62.6,Yes,1
+T0335,2024-05-31,Web Form,Shipping,High,40,20.2,No,5
+T0336,2025-04-30,Email,Technical,Low,94,30.7,No,4
+T0337,2025-03-09,Email,Accounts,Low,340,28.1,Yes,2
+T0338,2024-12-26,Phone,Technical,High,17,6.7,No,4
+T0339,2024-12-18,Email,Billing,Low,107,71.4,Yes,
+T0340,2024-09-09,Email,Shipping,Medium,50,34.2,No,
+T0341,2024-07-24,Phone,Technical,Medium,27,26.6,No,4
+T0342,2024-05-14,Email,Accounts,Medium,20,20.0,No,5
+T0343,2024-11-21,Chat,Technical,Low,33,92.4,No,1
+T0344,2025-03-20,Chat,Technical,Low,20,45.6,Yes,1
+T0345,2024-02-20,Chat,Technical,Medium,38,27.7,No,4
+T0346,2025-04-09,Email,Shipping,Urgent,27,12.1,No,5
+T0347,2024-05-05,Phone,Shipping,Medium,13,21.5,No,5
+T0348,2025-01-24,Email,Shipping,Low,109,142.8,No,1
+T0349,2024-11-26,Phone,Technical,High,41,16.4,No,4
+T0350,2025-03-25,Chat,Billing,Low,3,31.2,No,4
+T0351,2025-06-10,Web Form,Billing,High,41,12.4,No,5
+T0352,2024-06-01,Chat,Billing,Low,46,14.1,No,5
+T0353,2024-04-23,Email,Billing,Low,148,13.8,No,5
+T0354,2024-07-31,Email,Accounts,Medium,92,95.3,No,2
+T0355,2024-08-06,Phone,Technical,Medium,29,43.0,No,3
+T0356,2024-11-21,Web Form,Accounts,Low,117,54.1,Yes,1
+T0357,2024-10-13,Email,Technical,Low,122,36.3,No,4
+T0358,2024-02-07,Email,Accounts,Low,506,43.2,No,4
+T0359,2025-04-10,Phone,Technical,Low,28,42.8,No,3
+T0360,2025-03-16,Phone,Accounts,Low,32,47.4,No,4
+T0361,2025-06-04,Web Form,Technical,Low,58,56.2,No,3
+T0362,2025-04-17,Chat,Billing,Low,14,48.4,Yes,1
+T0363,2024-02-22,Phone,Technical,Low,24,39.2,No,4
+T0364,2024-02-01,Web Form,Technical,Low,187,66.8,No,3
+T0365,2024-11-20,Chat,Billing,Medium,42,34.5,No,3
+T0366,2025-01-10,Email,Billing,Low,207,31.1,No,4
+T0367,2024-03-22,Web Form,Accounts,Low,383,37.4,No,4
+T0368,2025-02-25,Chat,Shipping,High,39,10.6,No,5
+T0369,2024-03-27,Web Form,Technical,Medium,121,41.4,Yes,2
+T0370,2024-11-20,Email,Technical,Medium,341,18.7,No,5
+T0371,2024-08-09,Email,Technical,High,96,16.2,No,5
+T0372,2025-02-04,Chat,Shipping,Low,20,20.9,No,5
+T0373,2025-06-16,Email,Billing,High,95,15.4,No,4
+T0374,2024-02-06,Phone,Accounts,Low,20,25.7,No,4
+T0375,2024-08-10,Chat,Shipping,High,16,9.4,Yes,3
+T0376,2024-06-06,Web Form,Technical,Low,169,67.1,No,3
+T0377,2024-03-12,Email,Technical,Medium,131,50.8,No,3
+T0378,2024-09-10,Chat,Shipping,Medium,41,27.3,No,3
+T0379,2024-04-17,Email,Billing,Low,215,34.7,Yes,2
+T0380,2024-04-08,Phone,Accounts,Low,56,40.3,No,4
+T0381,2024-11-23,Email,Shipping,Low,94,92.7,Yes,1
+T0382,2024-09-21,Chat,Technical,Low,47,156.8,No,1
+T0383,2025-01-22,Chat,Accounts,High,76,8.4,No,5
+T0384,2025-05-03,Phone,Billing,Low,27,39.9,No,4
+T0385,2024-12-21,Phone,Billing,Medium,45,19.2,No,5
+T0386,2024-09-09,Email,Technical,High,45,8.4,No,5
+T0387,2025-04-07,Email,Billing,Medium,179,15.4,No,5
+T0388,2024-03-02,Web Form,Shipping,Medium,129,26.2,No,3
+T0389,2024-08-30,Email,Billing,High,64,8.2,Yes,3
+T0390,2025-05-26,Email,Accounts,Low,133,78.9,Yes,1
+T0391,2024-04-01,Chat,Technical,Low,37,50.3,No,3
+T0392,2025-03-01,Chat,Technical,Medium,99,43.3,No,4
+T0393,2025-01-09,Email,Technical,Low,138,83.2,Yes,1
+T0394,2025-03-15,Email,Accounts,Low,298,21.4,No,
+T0395,2024-12-11,Chat,Billing,Medium,9,38.7,No,3
+T0396,2025-05-08,Email,Shipping,Urgent,29,7.9,No,5
+T0397,2025-04-24,Chat,Technical,High,41,35.1,No,4
+T0398,2025-05-01,Chat,Technical,Urgent,25,7.5,No,5
+T0399,2024-01-23,Email,Billing,Low,118,21.6,No,5
+T0400,2024-03-15,Web Form,Shipping,Medium,137,19.7,No,4
+T0401,2024-07-13,Chat,Billing,Medium,14,27.3,No,4
+T0402,2025-04-20,Email,Billing,Urgent,28,10.6,No,5
+T0403,2024-09-13,Web Form,Technical,Low,382,142.7,No,1
+T0404,2024-02-10,Web Form,Accounts,High,120,11.5,No,4
+T0405,2025-06-09,Chat,Technical,Medium,23,21.1,No,4
+T0406,2024-02-07,Phone,Accounts,Low,25,33.8,No,4
+T0407,2024-07-24,Phone,Technical,High,53,11.0,Yes,3
+T0408,2024-05-19,Email,Billing,Medium,74,41.2,No,4
+T0409,2024-07-19,Chat,Accounts,High,37,15.1,Yes,3
+T0410,2024-11-26,Chat,Billing,Medium,24,11.6,No,5
+T0411,2024-07-03,Email,Shipping,Medium,75,33.0,No,3
+T0412,2024-12-30,Email,Billing,Low,71,18.5,No,5
+T0413,2025-02-08,Email,Billing,Low,229,59.4,Yes,1
+T0414,2025-05-07,Web Form,Technical,High,117,16.4,No,5
+T0415,2024-02-03,Web Form,Accounts,Low,44,50.9,Yes,1
+T0416,2024-07-29,Phone,Technical,Low,16,51.3,No,2
+T0417,2025-01-14,Email,Billing,Low,36,55.4,No,3
+T0418,2025-01-22,Phone,Billing,Medium,35,44.1,No,3
+T0419,2024-04-29,Phone,Technical,Low,34,26.3,No,4
+T0420,2025-02-28,Email,Shipping,High,31,14.4,No,5
+T0421,2025-01-17,Email,Shipping,Urgent,79,4.8,No,5
+T0422,2024-08-11,Email,Technical,Low,82,138.6,No,1
+T0423,2024-07-03,Web Form,Shipping,Low,43,24.5,Yes,2
+T0424,2024-05-29,Chat,Technical,Urgent,19,5.7,No,5
+T0425,2025-02-08,Email,Accounts,High,63,25.5,Yes,1
+T0426,2024-04-11,Phone,Billing,Low,38,40.2,No,4
+T0427,2024-12-19,Email,Shipping,Low,105,37.8,No,4
+T0428,2024-09-30,Email,Billing,Medium,29,29.9,No,4
+T0429,2024-03-29,Web Form,Billing,Medium,147,10.2,No,5
+T0430,2024-09-25,Email,Shipping,Urgent,72,4.9,No,5
+T0431,2024-03-13,Web Form,Technical,High,71,44.9,No,4
+T0432,2025-04-12,Web Form,Accounts,Medium,101,33.5,Yes,
+T0433,2024-11-26,Email,Accounts,Medium,222,24.8,No,4
+T0434,2024-08-26,Chat,Accounts,Low,14,23.1,No,4
+T0435,2025-01-14,Phone,Technical,Urgent,31,5.4,No,5
+T0436,2024-12-08,Web Form,Technical,Urgent,60,8.3,No,4
+T0437,2025-01-17,Email,Accounts,High,139,21.0,Yes,3
+T0438,2024-03-07,Web Form,Shipping,Low,80,56.5,No,3
+T0439,2024-07-27,Chat,Technical,High,47,19.7,No,4
+T0440,2025-03-09,Web Form,Billing,Low,174,58.5,No,
+T0441,2025-06-18,Email,Shipping,Low,130,86.0,Yes,1
+T0442,2024-01-31,Phone,Technical,High,20,22.9,No,5
+T0443,2024-12-12,Phone,Billing,Low,18,27.4,No,4
+T0444,2024-03-27,Chat,Technical,Medium,43,59.0,No,3
+T0445,2025-01-27,Chat,Shipping,Medium,24,19.7,No,5
+T0446,2024-05-15,Phone,Technical,High,26,36.6,No,4
+T0447,2025-06-16,Chat,Shipping,Medium,26,9.1,No,5
+T0448,2024-06-06,Chat,Accounts,Medium,62,18.9,No,5
+T0449,2024-09-16,Email,Billing,Medium,160,27.7,No,4
+T0450,2024-11-04,Email,Accounts,High,280,42.6,No,4
+T0451,2025-05-10,Email,Accounts,Medium,225,12.9,No,4
+T0452,2024-06-13,Phone,Shipping,Medium,49,24.1,No,4
+T0453,2024-12-19,Email,Accounts,Low,111,39.6,No,4
+T0454,2024-02-08,Email,Shipping,Low,79,29.6,No,3
+T0455,2025-01-17,Phone,Technical,Urgent,15,6.3,No,5
+T0456,2025-03-30,Chat,Technical,High,9,24.3,No,4
+T0457,2024-01-26,Chat,Technical,Medium,63,28.9,No,4
+T0458,2025-02-23,Email,Billing,Medium,112,32.8,No,4
+T0459,2024-06-14,Web Form,Technical,Low,89,21.3,No,4
+T0460,2024-12-15,Email,Billing,Medium,192,65.5,No,3
+T0461,2025-02-24,Email,Shipping,Medium,350,28.4,No,4
+T0462,2025-06-26,Phone,Accounts,Low,24,17.3,No,5
+T0463,2024-04-21,Chat,Accounts,Low,35,20.0,Yes,3
+T0464,2024-05-25,Phone,Accounts,Urgent,20,4.3,No,5
+T0465,2024-03-13,Email,Billing,Low,133,36.0,Yes,2
+T0466,2024-09-04,Phone,Accounts,Medium,53,12.7,No,5
+T0467,2024-10-10,Chat,Shipping,High,18,9.3,No,4
+T0468,2024-04-26,Email,Technical,Medium,315,42.9,Yes,1
+T0469,2025-05-31,Chat,Technical,Low,65,48.6,No,
+T0470,2025-03-08,Phone,Technical,Urgent,25,10.5,No,4
+T0471,2024-06-11,Email,Shipping,Medium,57,23.6,No,5
+T0472,2025-05-22,Email,Shipping,Medium,124,9.3,Yes,3
+T0473,2025-03-21,Email,Shipping,Low,71,55.1,No,3
+T0474,2024-08-07,Chat,Billing,Low,110,75.9,No,2
+T0475,2024-01-31,Chat,Billing,Low,58,39.0,No,3
+T0476,2025-02-25,Email,Accounts,Urgent,104,3.4,No,5
+T0477,2024-07-06,Web Form,Technical,Low,56,77.1,No,1
+T0478,2024-02-25,Email,Technical,Medium,208,18.9,No,5
+T0479,2024-09-20,Web Form,Technical,Urgent,175,13.8,No,5
+T0480,2025-02-19,Web Form,Technical,High,52,26.9,No,4
+T0481,2024-01-30,Web Form,Accounts,Medium,153,18.3,No,5
+T0482,2025-05-18,Email,Technical,Medium,74,71.0,Yes,1
+T0483,2024-03-22,Phone,Accounts,Low,16,51.9,Yes,1
+T0484,2024-11-22,Chat,Shipping,Medium,15,39.1,No,4
+T0485,2024-08-04,Chat,Shipping,Low,23,37.3,No,4
+T0486,2024-05-01,Phone,Billing,Low,62,64.3,No,3
+T0487,2024-05-16,Web Form,Billing,Medium,27,31.9,No,3
+T0488,2025-05-11,Chat,Billing,High,35,13.9,No,5
+T0489,2025-01-03,Web Form,Billing,High,103,22.8,Yes,3
+T0490,2024-02-05,Web Form,Accounts,Low,49,39.7,No,4
+T0491,2024-04-20,Web Form,Technical,High,99,30.8,No,3
+T0492,2024-11-07,Email,Technical,Medium,46,20.2,Yes,3
+T0493,2024-12-02,Email,Technical,Medium,75,16.9,No,5
+T0494,2024-03-06,Chat,Technical,Low,24,74.8,Yes,1
+T0495,2025-04-10,Phone,Billing,Low,7,31.0,No,4
+T0496,2024-04-16,Chat,Billing,Low,38,66.9,Yes,1
+T0497,2025-06-05,Phone,Technical,Urgent,58,5.9,No,5
+T0498,2025-03-16,Web Form,Technical,Low,122,103.7,Yes,1
+T0499,2024-12-19,Phone,Billing,Urgent,35,4.4,No,5
+T0500,2024-05-28,Chat,Accounts,Medium,20,35.2,No,4
+T0501,2024-01-04,Web Form,Technical,Medium,130,19.0,No,4
+T0502,2025-04-06,Web Form,Accounts,Low,53,23.9,No,4
+T0503,2024-08-10,Email,Billing,Medium,61,16.6,No,4
+T0504,2024-08-11,Email,Technical,Low,226,53.0,No,3
+T0505,2024-07-04,Email,Technical,Medium,134,91.9,No,
+T0506,2024-11-21,Chat,Technical,Low,16,20.2,No,4
+T0507,2025-02-26,Web Form,Technical,Medium,313,57.7,No,3
+T0508,2024-01-20,Web Form,Technical,Low,109,42.9,No,4
+T0509,2024-01-26,Phone,Technical,High,18,28.5,No,3
+T0510,2024-10-18,Chat,Billing,High,29,4.4,No,5
+T0511,2024-08-06,Phone,Accounts,Low,70,20.6,No,5
+T0512,2025-05-20,Chat,Billing,Low,16,33.1,Yes,2
+T0513,2024-06-30,Email,Shipping,Low,93,19.8,No,5
+T0514,2024-06-27,Phone,Shipping,Medium,17,21.2,No,5
+T0515,2024-10-06,Email,Billing,High,63,13.3,No,5
+T0516,2024-06-15,Phone,Technical,Urgent,29,5.4,No,5
+T0517,2024-11-01,Chat,Technical,Low,41,78.2,No,2
+T0518,2025-04-10,Phone,Technical,Low,27,35.1,No,3
+T0519,2024-03-12,Chat,Shipping,Low,91,44.4,Yes,2
+T0520,2025-05-09,Web Form,Technical,Low,71,57.8,No,3
+T0521,2025-03-04,Phone,Technical,Medium,46,25.7,No,4
+T0522,2025-01-03,Email,Technical,Low,171,86.9,Yes,1
+T0523,2025-03-02,Email,Billing,Medium,72,24.1,No,3
+T0524,2024-09-09,Web Form,Shipping,Medium,93,34.7,No,4
+T0525,2025-04-05,Email,Billing,Low,68,43.7,No,4
+T0526,2024-02-27,Email,Shipping,Medium,100,32.3,Yes,2
+T0527,2025-05-30,Email,Shipping,High,208,9.1,No,5
+T0528,2025-02-10,Email,Accounts,Medium,65,13.9,Yes,2
+T0529,2024-12-18,Chat,Shipping,High,16,6.6,No,4
+T0530,2024-12-04,Email,Shipping,Medium,96,23.9,No,5
+T0531,2025-04-09,Email,Technical,Medium,155,75.9,No,1
+T0532,2024-06-19,Chat,Technical,Low,24,60.5,No,3
+T0533,2025-05-02,Email,Technical,Low,56,37.8,Yes,2
+T0534,2024-12-31,Chat,Technical,Medium,25,53.6,No,3
+T0535,2024-02-03,Web Form,Accounts,Medium,68,20.0,No,5
+T0536,2024-04-27,Phone,Billing,Low,41,29.0,No,4
+T0537,2024-03-11,Email,Technical,Medium,94,18.9,No,4
+T0538,2025-01-22,Web Form,Billing,Low,154,32.5,No,3
+T0539,2024-12-09,Chat,Technical,Medium,37,59.2,No,2
+T0540,2024-07-13,Email,Technical,Low,69,108.0,No,1
+T0541,2024-02-05,Phone,Shipping,Medium,6,18.0,No,5
+T0542,2025-06-21,Phone,Technical,Low,39,63.1,No,3
+T0543,2025-01-22,Chat,Technical,Low,27,33.7,No,3
+T0544,2025-06-25,Email,Accounts,Medium,57,11.8,No,5
+T0545,2025-02-15,Email,Accounts,Urgent,56,14.6,No,4
+T0546,2024-09-13,Chat,Accounts,Low,16,37.6,No,3
+T0547,2024-02-03,Web Form,Accounts,High,35,10.8,No,5
+T0548,2024-12-17,Email,Accounts,Low,99,40.8,Yes,2
+T0549,2024-10-31,Phone,Billing,Medium,16,36.1,No,4
+T0550,2025-01-12,Chat,Technical,Medium,48,45.7,No,4
+T0551,2024-04-22,Email,Billing,Medium,25,80.2,No,2
+T0552,2025-01-19,Phone,Technical,Low,10,120.7,Yes,1
+T0553,2025-02-15,Email,Technical,Medium,149,29.2,No,3
+T0554,2024-03-13,Phone,Accounts,Medium,17,23.4,No,
+T0555,2024-08-16,Email,Billing,High,25,21.9,No,4
+T0556,2025-05-18,Web Form,Billing,Medium,131,17.8,No,5
+T0557,2024-08-09,Email,Technical,Medium,95,30.8,No,4
+T0558,2025-01-24,Email,Accounts,Medium,53,32.0,No,4
+T0559,2024-07-22,Phone,Shipping,Urgent,27,7.8,No,4
+T0560,2025-05-03,Phone,Billing,Medium,7,39.2,No,3
+T0561,2024-09-17,Email,Billing,Medium,136,11.5,No,5
+T0562,2025-05-09,Email,Accounts,Medium,98,25.2,No,4
+T0563,2024-03-24,Email,Technical,High,153,31.4,No,4
+T0564,2024-05-27,Email,Technical,Urgent,91,7.5,No,5
+T0565,2025-05-14,Chat,Accounts,Medium,23,18.7,No,
+T0566,2024-08-28,Email,Billing,High,178,9.0,No,4
+T0567,2025-01-04,Chat,Technical,Medium,19,64.0,No,3
+T0568,2024-08-12,Email,Shipping,Low,103,34.7,Yes,2
+T0569,2025-06-18,Web Form,Technical,Low,55,73.4,No,1
+T0570,2025-01-15,Email,Billing,Low,70,91.2,No,2
+T0571,2025-02-05,Web Form,Technical,High,167,11.2,No,5
+T0572,2024-07-25,Phone,Technical,Medium,74,78.7,No,2
+T0573,2025-03-06,Chat,Accounts,Medium,59,19.3,No,5
+T0574,2024-09-02,Email,Technical,Low,44,79.4,No,2
+T0575,2024-07-22,Web Form,Technical,Low,38,45.1,Yes,1
+T0576,2024-10-09,Chat,Billing,Low,6,20.8,No,5
+T0577,2024-12-30,Phone,Billing,High,52,13.2,No,5
+T0578,2024-01-24,Chat,Accounts,High,19,3.8,No,5
+T0579,2024-07-15,Email,Technical,Medium,53,55.4,No,3
+T0580,2024-07-19,Chat,Accounts,Medium,23,28.3,Yes,2
+T0581,2024-07-03,Email,Billing,Urgent,139,7.3,No,5
+T0582,2024-03-22,Chat,Shipping,Medium,16,22.2,No,5
+T0583,2025-05-02,Web Form,Technical,Low,139,52.3,No,3
+T0584,2024-05-12,Chat,Billing,Low,11,56.7,No,3
+T0585,2024-03-05,Email,Technical,Medium,97,24.6,No,3
+T0586,2024-10-17,Web Form,Technical,Medium,91,26.2,No,4
+T0587,2024-11-11,Email,Accounts,Urgent,83,3.6,No,4
+T0588,2025-06-08,Email,Accounts,Low,139,37.3,No,3
+T0589,2024-05-09,Phone,Billing,Low,51,69.3,Yes,1
+T0590,2024-02-27,Email,Accounts,Low,130,30.5,No,3
+T0591,2024-02-06,Phone,Technical,High,13,13.9,No,4
+T0592,2024-11-21,Web Form,Shipping,Medium,185,19.7,No,5
+T0593,2025-05-02,Email,Technical,Urgent,72,8.4,No,5
+T0594,2025-06-05,Email,Technical,Medium,98,30.8,No,4
+T0595,2024-05-15,Chat,Technical,High,49,22.2,No,5
+T0596,2025-04-15,Email,Shipping,Urgent,125,5.5,No,5
+T0597,2024-06-15,Email,Technical,Medium,280,26.1,No,4
+T0598,2024-08-12,Email,Billing,High,119,15.3,No,5
+T0599,2025-04-22,Chat,Accounts,Low,13,31.2,No,4
+T0600,2025-05-09,Chat,Technical,Medium,13,38.1,No,3
