@@ -153,9 +153,33 @@ def _extract_code(response_text: str) -> str:
             if in_block:
                 code_lines.append(line)
         if code_lines:
-            return "\n".join(code_lines).strip()
+            return _unescape_newlines("\n".join(code_lines).strip())
 
-    return text.strip()
+    return _unescape_newlines(text.strip())
+
+
+def _unescape_newlines(code: str) -> str:
+    """Repair code whose line breaks came back as literal "\\n" sequences.
+
+    Some providers occasionally return the whole snippet on one line with
+    escaped newlines, which can't run. Only when the text has no real line
+    break, doesn't compile as written and does compile once unescaped is it
+    changed, so ordinary code (including "\\n" inside string literals) and
+    JSON tool calls are left alone.
+    """
+    if "\n" in code or "\\n" not in code or code.lstrip().startswith("{"):
+        return code
+    try:
+        compile(code, "<llm code>", "exec")
+        return code
+    except SyntaxError:
+        pass
+    repaired = code.replace("\\r\\n", "\n").replace("\\n", "\n").replace("\\t", "\t")
+    try:
+        compile(repaired, "<llm code>", "exec")
+    except SyntaxError:
+        return code
+    return repaired
 
 
 def _system_prompt(core: tuple[DatasetRegistry, str] | None) -> str:
