@@ -254,3 +254,25 @@ def test_openrouter_upstream_errors_are_retried_but_gemini_markers_are_unchanged
     assert "Error code: 502" not in llm._OVERLOADED
     with pytest.raises(RuntimeError):
         RetryingChatModel(_model(RuntimeError("Error code: 502")), 6, sleep=waits.append).invoke(["m"])
+
+
+def test_openrouter_spending_cap_stops_requests_before_sending():
+    completions = _FakeCompletions(_openrouter_response(cost=0.01))
+    spent = llm.request_stats()["billed_usd"]
+    chat = llm.OpenRouterChat("m", 0.1, "k", {}, client=_fake_client(completions), budget_usd=spent + 0.015)
+    chat.invoke(["first"])                      # under the cap: sent, billed 0.01
+    chat.invoke(["second"])                     # still under (0.01 < 0.015): sent, billed 0.02 in total
+    with pytest.raises(RuntimeError, match="spending cap reached"):
+        chat.invoke(["third"])                  # at/over the cap: refused
+    assert len(completions.calls) == 2         # the third request was never sent
+    with _env(OPENROUTER_BUDGET_USD="0.027"):
+        assert llm.openrouter_budget_usd() == 0.027
+    with _env():
+        assert llm.openrouter_budget_usd() is None
+
+
+def test_spending_cap_error_is_not_retried():
+    model = _model(RuntimeError(llm.SPENDING_CAP_REACHED + ": $0.0270 billed"))
+    with pytest.raises(RuntimeError):
+        RetryingChatModel(model, 6, sleep=lambda s: pytest.fail("no retry"),
+                          transient=llm._OPENROUTER_TRANSIENT).invoke(["m"])

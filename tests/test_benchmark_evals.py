@@ -332,3 +332,12 @@ def test_rescore_regrades_offline_and_keeps_the_original():
     assert [r["correct_before_rescore"] for r in out] == [True, True, False]
     assert out[0]["failure"] == "wrong_result" and out[2]["failure"] is None  # API errors stay errors
     assert saved[0]["correct"] is True and "correct_before_rescore" not in saved[0]  # input untouched
+
+
+def test_spending_cap_stops_the_run_for_resume():
+    from agents.llm import SPENDING_CAP_REACHED
+
+    cap = {**_scored(2, False), "error": f"RuntimeError: {SPENDING_CAP_REACHED}: $0.027 billed"}
+    results, reason = benchmark.run_all([{"id": i, "question": "q"} for i in (1, 2, 3)],
+                                        lambda c: cap if c["id"] == 2 else _scored(c["id"], True))
+    assert len(results) == 2 and "spending cap reached after 2 question(s); 1 not run" in reason

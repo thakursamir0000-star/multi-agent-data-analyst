@@ -91,6 +91,15 @@ def openrouter_routing() -> dict[str, Any]:
     return routing
 
 
+SPENDING_CAP_REACHED = "OpenRouter spending cap reached"
+
+
+def openrouter_budget_usd() -> float | None:
+    """Optional hard cap on what one process may spend on OpenRouter (OPENROUTER_BUDGET_USD)."""
+    value = get_env("OPENROUTER_BUDGET_USD", "").strip()
+    return float(value) if value else None
+
+
 def get_max_retries() -> int:
     """Return the max Critic → Coder retries (MAX_RETRIES), read once on first use."""
     global _MAX_RETRIES
@@ -272,7 +281,8 @@ class OpenRouterChat:
     """
 
     def __init__(self, model: str, temperature: float, api_key: str, routing: dict[str, Any],
-                 *, base_url: str = OPENROUTER_BASE_URL, timeout: float = 180.0, client: Any = None):
+                 *, base_url: str = OPENROUTER_BASE_URL, timeout: float = 180.0, client: Any = None,
+                 budget_usd: float | None = None):
         if client is None:
             from openai import OpenAI
 
@@ -281,10 +291,16 @@ class OpenRouterChat:
         self.model = model
         self.temperature = temperature
         self.routing = routing
+        self.budget_usd = budget_usd
 
     def invoke(self, messages: Any, **kwargs: Any) -> Any:
         from langchain_core.messages import AIMessage
 
+        billed = request_stats()["billed_usd"]
+        if self.budget_usd is not None and billed >= self.budget_usd:
+            # Checked before sending, so spending stops at the cap plus at most the call in flight
+            raise RuntimeError(f"{SPENDING_CAP_REACHED}: ${billed:.6f} billed, cap ${self.budget_usd:.6f} "
+                               "(OPENROUTER_BUDGET_USD); no request sent")
         payload = [{"role": _ROLES.get(getattr(m, "type", "human"), "user"), "content": response_text(m)}
                    for m in messages]
         response = self.client.chat.completions.create(
@@ -324,7 +340,8 @@ def chat_model(groq_class: Any, temperature: float) -> RetryingChatModel:
     """
     rpm = get_requests_per_minute()
     if get_provider() == "openrouter":
-        model = OpenRouterChat(get_model(), temperature, get_env("OPENROUTER_API_KEY"), openrouter_routing())
+        model = OpenRouterChat(get_model(), temperature, get_env("OPENROUTER_API_KEY"), openrouter_routing(),
+                               budget_usd=openrouter_budget_usd())
         return RetryingChatModel(model, get_api_retries(), rpm=rpm, transient=_OPENROUTER_TRANSIENT)
     if get_provider() == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI

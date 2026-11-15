@@ -74,7 +74,7 @@ import pandas as pd
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-from agents.llm import rate_limit_kind, request_stats, retry_after_seconds  # noqa: E402,F401
+from agents.llm import SPENDING_CAP_REACHED, rate_limit_kind, request_stats, retry_after_seconds  # noqa: E402,F401
 from core.datasets import DatasetRegistry  # noqa: E402
 
 DATA_FILE = ROOT / "sample_data" / "sales_sample.csv"
@@ -512,6 +512,10 @@ def run_all(cases: list[dict], runner, sleep=time.sleep, max_wait: float = 240.0
             skipped = len(cases) - len(results)
             return results, (f"The provider's daily limit was reached after {len(results)} question(s); "
                              f"{skipped} not run. Finish with --resume after the quota resets.")
+        if SPENDING_CAP_REACHED in (result["error"] or ""):
+            skipped = len(cases) - len(results)
+            return results, (f"{SPENDING_CAP_REACHED} after {len(results)} question(s); {skipped} not run. "
+                             "Raise OPENROUTER_BUDGET_USD and finish with --resume.")
     return results, None
 
 
