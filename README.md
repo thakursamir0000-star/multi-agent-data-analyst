@@ -424,38 +424,51 @@ What the misses show:
 **How it was measured:**
 - **Same model on both sides:** `openai/gpt-oss-120b` through OpenRouter. Every call was pinned to one upstream provider (Prime Intellect) with fallbacks off. All 1,268 answered calls were served by it.
 - **"Before"** ran a copy of this code with the Planner, Coder, Critic and state from before the fixes. Everything else (benchmark, tools, data, provider settings) was identical, checked file by file.
-- **Size:** both suites, 3 runs per question per side, so 258 answers in total. There were 0 API errors, and OpenRouter billed **US$0.052** for all of it.
+- **Size:** both suites, 3 runs per question per side, 129 answers per side. There were 0 API errors.
 - **Held-out set:** the `support` suite was written before the fixes and wasn't used to tune them.
 - **Not mixed with the CI runs above:** those used another provider, so their numbers are kept separate.
+- **Strict grading for every number below:** for a "which …" question, the first option the answer names must be the expected one. The earlier grader accepted the expected name anywhere in the answer.
+  - The saved answers were graded again offline with `rescore()`, with no new LLM calls.
+  - This changed 9 grades, all "before" answers going from pass to fail: #111, #113 and #121, each of which named the wrong team or channel first.
+- **Three sets of runs:**
+  - **"Before":** the old agents.
+  - **"After":** the agent fixes.
+  - **"After v2":** the agent fixes, plus the Coder repairing code that comes back with literal `\n` instead of line breaks. It was measured in three fresh runs.
 
-| | Support (held out) | Sales (development) | **Both suites** |
+| | Before | After | **After v2** |
 |---|---|---|---|
-| Correct, before → after | 52 / 63 (82.5%) → **58 / 63 (92.1%)** | 58 / 66 (87.9%) → **63 / 66 (95.5%)** | **110 / 129 (85.3%) → 121 / 129 (93.8%)** |
-| Correct in each of the 3 runs | 17, 18, 17 → 20, 18, 20 (of 21) | 18, 20, 20 → 20, 22, 21 (of 22) | |
-| Multi-step | 28 / 39 → **34 / 39** | 14 / 21 → **19 / 21** | **42 / 60 (70%) → 53 / 60 (88%)** |
-| Critic approved a wrong answer | 11 → 5 | 7 → 3 | **18 → 8** |
-| LLM calls per question | 5.6 → 4.3 | 5.6 → 4.3 | about 23% fewer |
-| Tokens per question | 6,130 → 4,301 | 6,242 → 4,549 | about 29% fewer |
-| Latency p50 / p95 | 11.8 / 30.9 s → 8.6 / 14.7 s | 9.2 / 26.2 s → 6.8 / 10.8 s | slowest answers about twice as fast |
+| Correct, both suites | 101 / 129 (78.3%) | 121 / 129 (93.8%) | **124 / 129 (96.1%)** |
+| Correct in each run (of 43) | 32, 35, 34 | 40, 40, 41 | **42, 42, 40** |
+| Support (held out) | 43 / 63 | 58 / 63 | **58 / 63** |
+| Sales (development) | 58 / 66 | 63 / 66 | **66 / 66** |
+| Multi-step questions | 33 / 60 (55%) | 53 / 60 (88%) | **55 / 60 (92%)** |
+| Critic approved a wrong answer | 27 | 8 | **5** |
+| LLM calls per question | 5.6 | 4.3 | **4.2** |
+| Tokens per question (input / output) | 5,556 / 631 | 4,034 / 394 | **4,002 / 386** |
+| Latency p50 / p95, support | 11.8 / 30.9 s | 8.6 / 14.7 s | **6.5 / 9.1 s** |
+| Latency p50 / p95, sales | 9.2 / 26.2 s | 6.8 / 10.8 s | **6.2 / 9.1 s** |
+| Billed by OpenRouter | $0.0304 | $0.0217 | **$0.0202** |
 
 **What changed:**
 - **The fixed questions are the split-filter pattern.** Before, the plan filtered in one step (for example, keep Billing tickets from 2024), then ran `describe` or `group_aggregate` over the whole table in the next. After, a single step applies the filter itself: `query_sql` with `WHERE`, or a filtered DataFrame.
   - #112 and #115 went from 0 / 3 to 3 / 3.
   - #110 and #119 went from 1 / 3 to 3 / 3.
-  - #21 and #22 went from 0 / 3 to 2 / 3.
-- **Cheaper and faster:** the Critic approved fewer wrong answers, and answers took fewer calls and tokens, with the slowest about twice as fast.
-- **Significance:**
-  - **By run, it is significant:** 17 answers went from wrong to right and 6 from right to wrong (exact McNemar p = 0.035, treating the three runs as independent).
-  - **By question, it isn't conclusive yet:** 9 questions got better and 4 got worse (sign test p = 0.27).
+- **The Coder repair fixed the remaining sales misses.** The two "after" misses on sales #6 and #21 came from code with literal `\n` that couldn't run. With the repair, sales is 66 / 66.
+- **Cheaper and faster:** compared with "before", "after v2" uses about 25% fewer calls and 29% fewer tokens per question, and its slowest answers (p95) are about three times as fast.
 
-**Still wrong, and next:**
-- **#121, "Which team resolves Urgent tickets fastest?":** the Planner filters `priority == 'High'` on both sides.
-  - The "before" answers count as correct only because the name grader accepts an expected name anywhere in the answer, and those answers listed every team.
-  - Scored strictly, both sides miss it.
-- **Sales #6 and #21 in some runs:** the Coder returned code with literal `\n` instead of line breaks, so the code didn't run.
-- **The name grader is too lenient:** an answer that lists every option still passes. It affects both sides, and it's the next grader fix.
+**Statistical tests, "before" → "after v2":**
+- **The percentage gain:** accuracy rose by 17.8 points, from 78.3% to 96.1%.
+- **By question (the conservative test):** 11 questions were right in more of their three runs and 2 in fewer. A two-sided sign test gives **p = 0.022**, so the improvement is significant at the 5% level.
+- **By run:** 25 answers went from wrong to right and 2 from right to wrong, an exact McNemar **p < 0.0001**. This overstates the certainty, because the three runs repeat the same questions.
+- **The Coder repair on its own** (121 → 124) is too small a difference to test.
 
-The regression gate's baseline is unchanged: CI benchmarks `gpt-oss-120b` on Groq, and these runs used another provider. A run with Gemma 4 31B on the free Gemini tier is still in progress and will be reported separately.
+**Still wrong:**
+- **#121, "Which team resolves Urgent tickets fastest?":** wrong in all three runs. The Planner filters `priority == 'High'` instead of `'Urgent'`. It's a held-out question, so it isn't tuned for.
+- **#109 and #117:** each failed once, in run 3, when their SQL query didn't run.
+
+All OpenRouter runs together (387 answers) cost **US$0.072**.
+
+The regression gate's baseline is unchanged: CI benchmarks `gpt-oss-120b` on Groq, and these runs used another provider. A Gemma 4 31B run on the free Gemini tier was stopped partway through and isn't reported here.
 
 Pick **compare-all** in the workflow to add other models side by side.
 
