@@ -1,7 +1,8 @@
 {
-  "_note": "USD per 1M tokens, Groq on-demand list prices used for the benchmark's cost estimate. Prices change: check https://groq.com/pricing and update this file before quoting costs. Models missing here (e.g. qwen/qwen3.8-27b) show – for cost.",
+  "_note": "USD per 1M tokens, used for the benchmark's cost estimate. Bare model names are Groq on-demand list prices; \"openrouter:<model>\" is the provider the benchmark pins on OpenRouter (Prime Intellect, from OpenRouter's endpoints API on 2026-11-15; OpenRouter also reports the actual billed cost per run). Prices change: check https://groq.com/pricing and https://openrouter.ai/openai/gpt-oss-120b and update this file before quoting costs. Models missing here (e.g. qwen/qwen3.8-27b) show – for cost.",
   "models": {
     "openai/gpt-oss-120b": {"input": 0.15, "output": 0.75},
-    "openai/gpt-oss-20b": {"input": 0.10, "output": 0.50}
+    "openai/gpt-oss-20b": {"input": 0.10, "output": 0.50},
+    "openrouter:openai/gpt-oss-120b": {"input": 0.035, "output": 0.075}
   }
 }

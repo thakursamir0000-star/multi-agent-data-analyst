@@ -267,3 +267,18 @@ def test_request_counts_are_summarized():
     assert s["requests"] == 12  # failed requests count toward a free quota too
     assert s["requests_per_question"] == 5.0 and s["wait_s_per_question"] == 6.0
     assert "LLM requests: 12 (5.0 per scored question)" in benchmark.markdown(s, results, "m")
+
+
+def test_openrouter_billing_and_providers_are_summarized():
+    results = [{**_scored(1, True), "requests": 5, "billed_usd": 0.0004, "served_by": {"PrimeIntellect": 5}},
+               {**_scored(2, False), "requests": 4, "billed_usd": 0.0003, "served_by": {"PrimeIntellect": 4}}]
+    s = summarize(results)
+    assert s["billed_usd"] == pytest.approx(0.0007) and s["served_by"] == {"PrimeIntellect": 9}
+    assert "Answered by (as reported by OpenRouter): PrimeIntellect 9; billed $0.000700" in benchmark.markdown(s, results, "m")
+    assert "Answered by" not in benchmark.markdown(summarize([_scored(3, True)]), [], "m")  # Groq / Gemini runs
+
+
+def test_openrouter_has_its_own_price_entry():
+    prices = benchmark.load_prices()
+    assert prices["openrouter:openai/gpt-oss-120b"] == {"input": 0.035, "output": 0.075}
+    assert prices["openai/gpt-oss-120b"]["input"] == 0.15  # Groq's entry is unchanged

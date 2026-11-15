@@ -389,6 +389,11 @@ def run_case(case: dict, registry: DatasetRegistry, dataset_id: str, profile_tex
         # LLM requests sent (retries included) and time spent waiting on rate limits
         "requests": int(stats["requests"] - stats_before["requests"]),
         "wait_s": round(stats["wait_s"] - stats_before["wait_s"], 1),
+        # OpenRouter only: what it billed and which upstream provider answered each call
+        "billed_usd": round(stats.get("billed_usd", 0.0) - stats_before.get("billed_usd", 0.0), 8),
+        "served_by": {p: n - stats_before.get("served_by", {}).get(p, 0)
+                      for p, n in stats.get("served_by", {}).items()
+                      if n - stats_before.get("served_by", {}).get(p, 0)},
         "error": error,
         # What each agent did, for the step checks and for reading the misses
         "plan": plan,
@@ -536,6 +541,8 @@ def summarize(cases: list[dict], planned: int | None = None, price: dict[str, fl
         "requests": sum(c.get("requests", 0) for c in cases),
         "requests_per_question": mean([c.get("requests", 0) for c in scored], 1),
         "wait_s_per_question": mean([c.get("wait_s", 0.0) for c in scored], 1),
+        "billed_usd": round(sum(c.get("billed_usd", 0.0) for c in cases), 6),
+        "served_by": dict(sum((Counter(c.get("served_by", {})) for c in cases), Counter())),
         "filter_questions": len(filtered),
         "plan_filter_rate": mean([float(bool(c["plan_has_filters"])) for c in filtered]),
         "code_filter_rate": mean([float(bool(c["code_has_filters"])) for c in filtered]),
@@ -627,6 +634,10 @@ def markdown(summary: dict, cases: list[dict], model: str, stop_reason: str | No
         lines += ["", f"LLM requests: {s['requests']} ({_fmt(s.get('requests_per_question'))} per scored question); "
                       f"{_fmt(s.get('wait_s_per_question'), ' s')} per question spent waiting on rate limits "
                       "(included in latency)."]
+    if s.get("served_by"):
+        served = ", ".join(f"{p} {n}" for p, n in sorted(s["served_by"].items()))
+        lines += ["", f"Answered by (as reported by OpenRouter): {served}; billed ${s.get('billed_usd', 0):.6f} "
+                      "(reasoning tokens included)."]
     if s["consistent_share"] is not None:
         lines += ["", f"Same outcome in every run for {s['consistent_share']:.0%} of questions."]
     misses = [c for c in cases if not c["correct"]]
@@ -782,6 +793,9 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true",
                         help="reuse the questions an interrupted run with the same suite, model, label and "
                              "repeats already finished (saved in evaluation/results/progress/)")
+    parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR,
+                        help="where results and progress files go (default evaluation/results); use a separate "
+                             "folder per experiment so runs are never mixed")
     parser.add_argument("--gate", action="store_true", help="fail if accuracy drops below evaluation/baseline.json")
     parser.add_argument("--no-history", action="store_true", help="don't append the run to history.jsonl")
     parser.add_argument("--history", action="store_true", help="print the trend table of recorded runs and exit")
@@ -819,6 +833,8 @@ def main() -> None:
     models = [m.strip() for m in (args.models or args.model or agent_llm.get_model()).split(",") if m.strip()]
     commit = current_commit()
     repeats = max(args.repeats, 1)
+    results_dir = args.results_dir
+    provider = agent_llm.get_provider()
     prices = load_prices()
     registry = DatasetRegistry(data_dir=None, max_bytes=50 * 1024 * 1024)
     datasets = {}
@@ -833,7 +849,7 @@ def main() -> None:
             dataset_id, profile_text = datasets[name]
             # Run-major order: if a daily limit stops the run, the earlier runs are complete.
             jobs = [{**c, "repeat": r} for r in range(1, repeats + 1) for c in cases]
-            path = progress_path(name, model, args.label, repeats)
+            path = progress_path(name, model, args.label, repeats, root=results_dir / "progress")
             done = start_progress(path, args.resume)
             todo = [j for j in jobs if (j["id"], j["repeat"]) not in done]
             print(f"\n== {agent_llm.get_provider()} {model} · {name} ({len(jobs)} runs"
@@ -850,7 +866,9 @@ def main() -> None:
                 todo, lambda case, ds=dataset_id, pt=profile_text: run_case(case, registry, ds, pt), on_result=save)
             finished = {**done, **{(r["id"], r["repeat"]): r for r in new}}
             results = [finished[(j["id"], j["repeat"])] for j in jobs if (j["id"], j["repeat"]) in finished]
-            summary = summarize(results, planned=len(jobs), price=prices.get(model))
+            # Prices are per provider: "openrouter:<model>" for OpenRouter; bare names are Groq's
+            price = prices.get(f"{provider}:{model}") or (prices.get(model) if provider == "groq" else None)
+            summary = summarize(results, planned=len(jobs), price=price)
             reports.append({"model": model, "suite": name, "dataset": spec["file"].name, "summary": summary,
                             "stop_reason": stop_reason, "results": results})
 
@@ -864,14 +882,14 @@ def main() -> None:
         text += "\n\n**Regression gate:** " + ("failed" if failures else "passed") + "\n" + "".join(
             f"\n- {line}" for line in failures + notes)
     # Save first: the measured answers must survive any problem with printing.
-    RESULTS_DIR.mkdir(exist_ok=True)
-    (RESULTS_DIR / "benchmark.json").write_text(json.dumps(reports, indent=2, default=str), encoding="utf-8")
+    results_dir.mkdir(parents=True, exist_ok=True)
+    (results_dir / "benchmark.json").write_text(json.dumps(reports, indent=2, default=str), encoding="utf-8")
     if not args.no_history:
         append_history(entries)
     print("\n" + text)
     if any(r["stop_reason"] for r in reports):
         print("\nNot finished: rerun the same command with --resume after the quota resets. "
-              "Finished questions are kept in evaluation/results/progress/.")
+              f"Finished questions are kept in {results_dir / 'progress'}.")
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
             f.write("## Multi-agent benchmark\n\n" + text + "\n")

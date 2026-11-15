@@ -25,8 +25,11 @@ from tools.config import get_env
 
 DEFAULT_MODEL = "openai/gpt-oss-120b"  # Groq
 DEFAULT_GEMINI_MODEL = "gemini-4-hydrogen"  # free tier; fast enough for the benchmark
-PROVIDERS = ("groq", "gemini")
-_KEY_NAMES = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY"}
+DEFAULT_OPENROUTER_MODEL = "openai/gpt-oss-120b"
+DEFAULT_OPENROUTER_PROVIDER = "primeintellect"  # OpenRouter's slug for Prime Intellect
+OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+PROVIDERS = ("groq", "gemini", "openrouter")
+_KEY_NAMES = {"groq": "GROQ_API_KEY", "gemini": "GEMINI_API_KEY", "openrouter": "OPENROUTER_API_KEY"}
 
 _PROVIDER: str | None = None
 _MODEL: str | None = None
@@ -42,7 +45,7 @@ _THINK_OPEN_RE = re.compile(r"<think(?:ing)?>")
 
 
 def get_provider() -> str:
-    """Return the LLM provider (LLM_PROVIDER: groq or gemini), read once on first use."""
+    """Return the LLM provider (LLM_PROVIDER: groq, gemini or openrouter), read once on first use."""
     global _PROVIDER
     if _PROVIDER is None:
         provider = get_env("LLM_PROVIDER", "groq").strip().lower() or "groq"
@@ -58,14 +61,34 @@ def api_key_name() -> str:
 
 
 def get_model() -> str:
-    """Return the model name for the active provider (GROQ_MODEL or GEMINI_MODEL), read once."""
+    """Return the model name for the active provider (GROQ_MODEL, GEMINI_MODEL or
+    OPENROUTER_MODEL), read once."""
     global _MODEL
     if _MODEL is None:
         if get_provider() == "gemini":
             _MODEL = get_env("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
+        elif get_provider() == "openrouter":
+            _MODEL = get_env("OPENROUTER_MODEL", DEFAULT_OPENROUTER_MODEL)
         else:
             _MODEL = get_env("GROQ_MODEL", DEFAULT_MODEL)
     return _MODEL
+
+
+def openrouter_routing() -> dict[str, Any]:
+    """OpenRouter provider routing: which provider serves the model, and whether
+    OpenRouter may fall back to another one.
+
+    OPENROUTER_PROVIDER (default primeintellect; comma-separated for an order)
+    and OPENROUTER_ALLOW_FALLBACKS (default false). Fallbacks stay off for the
+    benchmark: other providers serve the same model at other precisions, so
+    one run must not mix them.
+    """
+    order = [p.strip() for p in get_env("OPENROUTER_PROVIDER", DEFAULT_OPENROUTER_PROVIDER).split(",") if p.strip()]
+    allow = get_env("OPENROUTER_ALLOW_FALLBACKS", "false").strip().lower() in ("1", "true", "yes", "on")
+    routing: dict[str, Any] = {"allow_fallbacks": allow}
+    if order:
+        routing["order"] = order
+    return routing
 
 
 def get_max_retries() -> int:
@@ -122,6 +145,13 @@ _RETRY_AFTER = (
     re.compile(r"retryDelay'?\"?:\s*'?\"?([\d.]+)s"),  # Gemini RetryInfo: 'retryDelay': '33s'
 )
 _OVERLOADED = ("UNAVAILABLE", "overloaded", "DEADLINE_EXCEEDED", "INTERNAL", "503", "504")
+# OpenRouter (openai SDK) errors that are worth a retry: upstream provider
+# failures, server errors and timeouts. Used for OpenRouter only, so the Groq
+# and Gemini paths retry exactly as before.
+_OPENROUTER_TRANSIENT = _OVERLOADED + (
+    "Error code: 500", "Error code: 502", "Provider returned error", "APITimeoutError",
+    "APIConnectionError", "Request timed out", "returned no answer",
+)
 
 
 def rate_limit_kind(error: str | None) -> str | None:
@@ -146,13 +176,23 @@ def retry_after_seconds(error: str, default: float = 30.0) -> float:
 
 _LOCK = threading.Lock()
 _CALL_TIMES: deque[float] = deque()
-_STATS = {"requests": 0, "wait_s": 0.0}
+_STATS = {"requests": 0, "wait_s": 0.0, "billed_usd": 0.0}
+_SERVED_BY: dict[str, int] = {}  # provider name -> answered calls (OpenRouter reports it)
 
 
-def request_stats() -> dict[str, float]:
-    """LLM requests sent (including retried ones) and seconds spent waiting, so far."""
+def request_stats() -> dict[str, Any]:
+    """LLM requests sent (including retried ones), seconds spent waiting, what
+    OpenRouter billed, and which upstream providers answered, so far."""
     with _LOCK:
-        return dict(_STATS)
+        return {**_STATS, "served_by": dict(_SERVED_BY)}
+
+
+def _record_answer(provider: str | None, cost: float | None) -> None:
+    with _LOCK:
+        key = provider or "unknown"
+        _SERVED_BY[key] = _SERVED_BY.get(key, 0) + 1
+        if cost:
+            _STATS["billed_usd"] += float(cost)
 
 
 def _pace(rpm: int, sleep=time.sleep, now=time.monotonic) -> None:
@@ -184,11 +224,12 @@ class RetryingChatModel:
     """
 
     def __init__(self, model: Any, attempts: int, *, rpm: int = 0, max_wait: float = 90.0,
-                 sleep=time.sleep, now=time.monotonic):
+                 sleep=time.sleep, now=time.monotonic, transient: tuple[str, ...] = _OVERLOADED):
         self.model = model
         self.attempts = max(1, attempts)
         self.rpm = rpm
         self.max_wait = max_wait
+        self.transient = transient
         self._sleep = sleep
         self._now = now
 
@@ -200,7 +241,7 @@ class RetryingChatModel:
             except Exception as e:  # inspected below; anything else is re-raised
                 text = f"{type(e).__name__}: {e}"
                 kind = rate_limit_kind(text)
-                overloaded = kind is None and any(marker in text for marker in _OVERLOADED)
+                overloaded = kind is None and any(marker in text for marker in self.transient)
                 if kind == "daily" or not (kind == "minute" or overloaded) or attempt == self.attempts:
                     raise
                 backoff = min(2.0 ** (attempt + 1), self.max_wait)
@@ -214,15 +255,77 @@ class RetryingChatModel:
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+_ROLES = {"system": "system", "human": "user", "ai": "assistant"}
+
+
+class OpenRouterChat:
+    """A minimal chat model over OpenRouter's OpenAI-compatible API (openai SDK).
+
+    ``invoke(messages)`` takes LangChain messages and returns an ``AIMessage``,
+    like the LangChain clients, so the agents don't change. Every request:
+    - pins the upstream provider (``routing``, see ``openrouter_routing``);
+    - asks OpenRouter for the billed cost (``usage.include``).
+    The reply records which provider actually answered and what was billed
+    (``response_metadata``); reasoning tokens are counted in the output tokens,
+    since they are billed as output. The SDK's own retries are off:
+    RetryingChatModel retries instead.
+    """
+
+    def __init__(self, model: str, temperature: float, api_key: str, routing: dict[str, Any],
+                 *, base_url: str = OPENROUTER_BASE_URL, timeout: float = 180.0, client: Any = None):
+        if client is None:
+            from openai import OpenAI
+
+            client = OpenAI(api_key=api_key, base_url=base_url, max_retries=0, timeout=timeout)
+        self.client = client
+        self.model = model
+        self.temperature = temperature
+        self.routing = routing
+
+    def invoke(self, messages: Any, **kwargs: Any) -> Any:
+        from langchain_core.messages import AIMessage
+
+        payload = [{"role": _ROLES.get(getattr(m, "type", "human"), "user"), "content": response_text(m)}
+                   for m in messages]
+        response = self.client.chat.completions.create(
+            model=self.model, messages=payload, temperature=self.temperature,
+            extra_body={"provider": self.routing, "usage": {"include": True}},
+        )
+        extra = getattr(response, "model_extra", None) or {}
+        if not getattr(response, "choices", None):
+            raise RuntimeError(f"OpenRouter returned no answer: {extra.get('error') or response}")
+        choice = response.choices[0]
+        usage = response.usage
+        usage_extra = getattr(usage, "model_extra", None) or {}
+        details = getattr(usage, "completion_tokens_details", None)
+        reasoning = int(getattr(details, "reasoning_tokens", 0) or 0)
+        provider = getattr(response, "provider", None) or extra.get("provider")
+        cost = getattr(usage, "cost", None) or usage_extra.get("cost")
+        _record_answer(provider, cost)
+        input_tokens, output_tokens = int(usage.prompt_tokens or 0), int(usage.completion_tokens or 0)
+        return AIMessage(
+            content=choice.message.content or "",
+            usage_metadata={"input_tokens": input_tokens, "output_tokens": output_tokens,
+                            "total_tokens": input_tokens + output_tokens,
+                            "output_token_details": {"reasoning": reasoning}},
+            response_metadata={"provider": provider, "model": getattr(response, "model", None),
+                               "id": getattr(response, "id", None), "billed_usd": cost,
+                               "finish_reason": choice.finish_reason},
+        )
+
+
 def chat_model(groq_class: Any, temperature: float) -> RetryingChatModel:
     """The chat model for one agent call, for the active provider.
 
     ``groq_class`` is the node's own ``ChatGroq`` import (patched in tests).
     Groq retries rate limits itself (honouring Groq's suggested wait), so the
     wrapper doesn't retry it again; Gemini's SDK retries are turned off
-    (``max_retries=1``) and the wrapper retries instead.
+    (``max_retries=1``) and the wrapper retries instead; so are OpenRouter's.
     """
     rpm = get_requests_per_minute()
+    if get_provider() == "openrouter":
+        model = OpenRouterChat(get_model(), temperature, get_env("OPENROUTER_API_KEY"), openrouter_routing())
+        return RetryingChatModel(model, get_api_retries(), rpm=rpm, transient=_OPENROUTER_TRANSIENT)
     if get_provider() == "gemini":
         from langchain_google_genai import ChatGoogleGenerativeAI
 

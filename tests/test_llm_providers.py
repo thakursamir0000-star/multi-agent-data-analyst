@@ -161,3 +161,96 @@ def test_response_text_handles_strings_and_content_blocks():
               {"type": "text", "text": "here", "extras": {"signature": "abc"}}]
     assert response_text(AIMessage(content=blocks)) == "Answer here"
     assert response_text(MagicMock(content="from a mock")) == "from a mock"
+
+
+# ── OpenRouter ──────────────────────────────────────────────────────
+
+class _FakeCompletions:
+    """Records the request and returns an OpenRouter-shaped response."""
+
+    def __init__(self, response=None, error=None):
+        self.calls, self.response, self.error = [], response, error
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.error:
+            raise self.error
+        return self.response
+
+
+def _openrouter_response(content="Answer", provider="PrimeIntellect", cost=0.0000123):
+    from openai.types.chat import ChatCompletion
+
+    return ChatCompletion.model_validate({
+        "id": "gen-1", "object": "chat.completion", "created": 0, "model": "openai/gpt-oss-120b",
+        "provider": provider,
+        "choices": [{"index": 0, "finish_reason": "stop", "message": {"role": "assistant", "content": content}}],
+        "usage": {"prompt_tokens": 100, "completion_tokens": 40, "total_tokens": 140, "cost": cost,
+                  "completion_tokens_details": {"reasoning_tokens": 30}},
+    })
+
+
+def _fake_client(completions):
+    return MagicMock(chat=MagicMock(completions=completions))
+
+
+def test_openrouter_provider_settings():
+    with _env(LLM_PROVIDER="openrouter"):
+        assert llm.api_key_name() == "OPENROUTER_API_KEY" and llm.get_model() == "openai/gpt-oss-120b"
+        assert llm.openrouter_routing() == {"allow_fallbacks": False, "order": ["primeintellect"]}
+    with _env(OPENROUTER_PROVIDER="groq, primeintellect", OPENROUTER_ALLOW_FALLBACKS="true"):
+        assert llm.openrouter_routing() == {"allow_fallbacks": True, "order": ["groq", "primeintellect"]}
+
+
+def test_openrouter_request_pins_the_provider_and_reads_usage():
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    completions = _FakeCompletions(_openrouter_response())
+    chat = llm.OpenRouterChat("openai/gpt-oss-120b", 0.1, "test-key-not-real",
+                              {"allow_fallbacks": False, "order": ["primeintellect"]},
+                              client=_fake_client(completions))
+    before = llm.request_stats()
+    reply = chat.invoke([SystemMessage(content="You plan."), HumanMessage(content="Total revenue?")])
+
+    sent = completions.calls[0]
+    assert sent["model"] == "openai/gpt-oss-120b" and sent["temperature"] == 0.1
+    assert sent["messages"] == [{"role": "system", "content": "You plan."}, {"role": "user", "content": "Total revenue?"}]
+    assert sent["extra_body"] == {"provider": {"allow_fallbacks": False, "order": ["primeintellect"]},
+                                  "usage": {"include": True}}
+    assert reply.content == "Answer"
+    assert reply.usage_metadata["input_tokens"] == 100 and reply.usage_metadata["output_tokens"] == 40
+    assert reply.usage_metadata["output_token_details"] == {"reasoning": 30}  # billed as output
+    assert reply.response_metadata["provider"] == "PrimeIntellect"
+    after = llm.request_stats()
+    assert after["served_by"]["PrimeIntellect"] - before["served_by"].get("PrimeIntellect", 0) == 1
+    assert after["billed_usd"] - before["billed_usd"] == pytest.approx(0.0000123)
+
+
+def test_openrouter_empty_answer_and_missing_choices():
+    empty = llm.OpenRouterChat("m", 0.1, "k", {}, client=_fake_client(_FakeCompletions(_openrouter_response(None))))
+    assert empty.invoke(["hi"]).content == ""
+    broken = _openrouter_response()
+    broken.choices = []
+    with pytest.raises(RuntimeError, match="returned no answer"):
+        llm.OpenRouterChat("m", 0.1, "k", {}, client=_fake_client(_FakeCompletions(broken))).invoke(["hi"])
+
+
+def test_chat_model_builds_openrouter_with_wrapper_retries():
+    with _env(LLM_PROVIDER="openrouter", OPENROUTER_API_KEY="test-key-not-real"), \
+            patch("agents.llm.OpenRouterChat") as chat_cls:
+        wrapped = llm.chat_model(MagicMock(), temperature=0.3)
+    args = chat_cls.call_args.args
+    assert args[:3] == ("openai/gpt-oss-120b", 0.3, "test-key-not-real")
+    assert args[3] == {"allow_fallbacks": False, "order": ["primeintellect"]}
+    assert wrapped.attempts == 6 and "Error code: 502" in wrapped.transient
+
+
+def test_openrouter_upstream_errors_are_retried_but_gemini_markers_are_unchanged():
+    waits = []
+    model = _model(RuntimeError("InternalServerError: Error code: 502 - Provider returned error"), AIMessage(content="ok"))
+    reply = RetryingChatModel(model, 6, sleep=waits.append, transient=llm._OPENROUTER_TRANSIENT).invoke(["m"])
+    assert reply.content == "ok" and waits == [4.0]
+    # Groq and Gemini keep their own list: a 502 is not retried there
+    assert "Error code: 502" not in llm._OVERLOADED
+    with pytest.raises(RuntimeError):
+        RetryingChatModel(_model(RuntimeError("Error code: 502")), 6, sleep=waits.append).invoke(["m"])
