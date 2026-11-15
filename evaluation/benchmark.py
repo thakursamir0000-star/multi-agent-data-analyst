@@ -145,7 +145,13 @@ def build_cases(df: pd.DataFrame) -> list[dict]:
         {"id": 22, "question": "What is the average profit per transaction for the Gadgets category in 2024?",
          "number": gadgets_2024["profit"].mean(), "filters": [["Gadgets"], ["2024"]]},
     ]
-    return [{**c, "level": "basic"} for c in basic] + [{**c, "level": "multi_step"} for c in multi_step]
+    # Every possible answer to each "which ..." question, for strict name grading
+    options = {"region": _options(d["region"]), "category": _options(d["category"]),
+               "product": _options(d["product"]), "month": _month_options(d["date"])}
+    asks = {2: "region", 5: "category", 8: "product", 12: "month", 15: "product", 16: "region",
+            18: "category", 21: "product"}
+    cases = [{**c, "level": "basic"} for c in basic] + [{**c, "level": "multi_step"} for c in multi_step]
+    return [{**c, "candidates": options[asks[c["id"]]]} if "names" in c else c for c in cases]
 
 
 def build_support_cases(df: pd.DataFrame) -> list[dict]:
@@ -219,7 +225,22 @@ def build_support_cases(df: pd.DataFrame) -> list[dict]:
          "names": [d[d["priority"] == "Urgent"].groupby("team")["resolution_hours"].mean().idxmin()],
          "filters": [["Urgent"]]},
     ]
-    return [{**c, "level": "basic"} for c in basic] + [{**c, "level": "multi_step"} for c in multi_step]
+    options = {"team": _options(d["team"]), "channel": _options(d["channel"]),
+               "priority": _options(d["priority"]), "month": _month_options(d["created"])}
+    asks = {103: "team", 106: "channel", 111: "team", 113: "channel", 117: "month", 118: "priority", 121: "team"}
+    cases = [{**c, "level": "basic"} for c in basic] + [{**c, "level": "multi_step"} for c in multi_step]
+    return [{**c, "candidates": options[asks[c["id"]]]} if "names" in c else c for c in cases]
+
+
+def _options(column: pd.Series) -> list[list[str]]:
+    """Every value of a column, each as a one-spelling candidate."""
+    return [[str(v)] for v in sorted(column.dropna().unique())]
+
+
+def _month_options(dates: pd.Series) -> list[list[str]]:
+    """Every month in the data, in the spellings a month answer may use."""
+    months = sorted(pd.to_datetime(dates).dt.to_period("M").unique())
+    return [[str(m), m.strftime("%B %Y"), m.strftime("%b %Y")] for m in months]
 
 
 SUITES = {
@@ -279,16 +300,61 @@ def fold_typography(text: str) -> str:
     return " ".join(text.split()).lower()
 
 
-def matches_names(text: str, names: list) -> bool:
-    """Every expected name appears; a nested list means "any of these spellings"."""
+def _spellings(name) -> list[str]:
+    return [fold_typography(str(alt)) for alt in (name if isinstance(name, list) else [name])]
+
+
+def _first_mention(folded: str, spellings: list[str]) -> int | None:
+    """Where a name is first mentioned as a whole word (not inside "Western" or "lowest")."""
+    found = [m.start() for s in spellings
+             for m in [re.search(rf"(?<![0-9a-z]){re.escape(s)}(?![0-9a-z])", folded)] if m]
+    return min(found) if found else None
+
+
+def matches_names(text: str, names: list, candidates: list | None = None) -> bool:
+    """Does the answer name the expected values? A nested list means "any of these spellings".
+
+    Without ``candidates``, every expected name only has to appear somewhere,
+    so an answer that lists every option passes. With ``candidates`` (every
+    possible answer to the question), grading is strict: the first
+    ``len(names)`` options the answer mentions must be the expected ones, so
+    "Accounts 26.4 h, Shipping 29.4 h, Billing 32.2 h" doesn't count as
+    naming Billing.
+    """
     folded = fold_typography(text)
-    return all(any(fold_typography(str(alt)) in folded for alt in (n if isinstance(n, list) else [n])) for n in names)
+    if candidates is None:
+        return all(any(s in folded for s in _spellings(n)) for n in names)
+    expected = {tuple(_spellings(n)) for n in names}
+    groups = [tuple(_spellings(c)) for c in candidates]
+    want = [g for g in groups if any(set(g) & set(e) for e in expected)]
+    if len(want) != len(expected):
+        return False  # an expected name isn't among the candidates: grade as a miss, never a pass
+    mentioned = sorted((pos, g) for g in groups if (pos := _first_mention(folded, list(g))) is not None)
+    first = {g for _, g in mentioned[: len(expected)]}
+    return first == set(want)
 
 
 def is_correct(case: dict, answer: str) -> bool:
     if "number" in case:
         return matches_number(answer, case["number"], case.get("ratio", False), case.get("absolute", False))
-    return matches_names(answer, case["names"])
+    return matches_names(answer, case["names"], case.get("candidates"))
+
+
+def rescore(results: list[dict], cases: list[dict]) -> list[dict]:
+    """Grade saved answers again with the current grader, offline (no LLM calls).
+
+    Returns new result dicts with "correct" and "failure" recomputed and the
+    earlier grade kept as "correct_before_rescore"; the input is not changed.
+    API errors stay errors.
+    """
+    by_id = {c["id"]: c for c in cases}
+    rescored = []
+    for r in results:
+        new = {**r, "correct_before_rescore": r["correct"]}
+        new["correct"] = bool(r["answer"]) and not r.get("error") and is_correct(by_id[r["id"]], r["answer"])
+        new["failure"] = failure_type(new)
+        rescored.append(new)
+    return rescored
 
 
 # ── step checks and failure types ───────────────────────────────────

@@ -14,6 +14,7 @@ from evaluation.benchmark import (
     failure_type,
     filter_checks,
     gate,
+    matches_names,
     history_entry,
     history_table,
     summarize,
@@ -282,3 +283,52 @@ def test_openrouter_has_its_own_price_entry():
     prices = benchmark.load_prices()
     assert prices["openrouter:openai/gpt-oss-120b"] == {"input": 0.035, "output": 0.075}
     assert prices["openai/gpt-oss-120b"]["input"] == 0.15  # Groq's entry is unchanged
+
+
+# ── strict name grading and offline rescoring ───────────────────────
+
+TEAMS = [["Accounts"], ["Billing"], ["Shipping"], ["Technical"]]
+
+
+@pytest.mark.parametrize("answer, ok", [
+    ("The Billing team resolves Urgent tickets fastest (5.5 h).", True),
+    ("Billing is fastest; Accounts (5.8 h) and Shipping follow.", True),            # runner-ups after the answer
+    ("Accounts 26.4 h, Shipping 29.4 h, Billing 32.2 h, Technical 40.9 h.", False),  # lists every option
+    ("The Accounts team is fastest. Billing is second.", False),
+    ("We cannot tell which team is fastest.", False),
+])
+def test_strict_names_take_the_first_option_mentioned(answer, ok):
+    assert matches_names(answer, ["Billing"], TEAMS) is ok
+    assert matches_names(answer, ["Billing"]) is ("Billing" in answer)  # the lenient path is unchanged
+
+
+def test_strict_names_use_whole_words_and_spellings():
+    regions = [["East"], ["North"], ["South"], ["West"]]
+    assert matches_names("In the West, Gadget Z leads; at least North is close.", ["West"], regions)
+    assert not matches_names("Western sales lead; North is first by profit.", ["West"], regions)
+    months = [["2024-11", "November 2024", "Nov 2024"], ["2024-12", "December 2024", "Dec 2024"]]
+    assert matches_names("December 2024 had 42 tickets, November 2024 had 41.", [months[1]], months)
+    top3 = [["A"], ["B"], ["C"], ["D"]]
+    assert matches_names("Top 3: B, A and C; D is fourth.", ["A", "B", "C"], top3)
+    assert not matches_names("Top 3: B, D and C.", ["A", "B", "C"], top3)
+    assert not matches_names("Billing", ["Unknown"], TEAMS)  # an expected name outside the options never passes
+
+
+def test_every_named_answer_has_its_options():
+    for suite in SUITES:
+        for case in _cases(suite):
+            if "names" in case:
+                options = {s for c in case["candidates"] for s in c}
+                assert all(any(s in options for s in (n if isinstance(n, list) else [n])) for n in case["names"])
+
+
+def test_rescore_regrades_offline_and_keeps_the_original():
+    cases = [{"id": 121, "names": ["Billing"], "candidates": TEAMS, "level": "multi_step"}]
+    saved = [{**_scored(121, True), "answer": "Accounts 26.4 h, Billing 32.2 h."},
+             {**_scored(121, True), "answer": "Billing is fastest."},
+             {**_scored(121, False), "answer": "", "error": "RateLimitError 429"}]
+    out = benchmark.rescore(saved, cases)
+    assert [r["correct"] for r in out] == [False, True, False]
+    assert [r["correct_before_rescore"] for r in out] == [True, True, False]
+    assert out[0]["failure"] == "wrong_result" and out[2]["failure"] is None  # API errors stay errors
+    assert saved[0]["correct"] is True and "correct_before_rescore" not in saved[0]  # input untouched
